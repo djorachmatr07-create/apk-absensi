@@ -104,7 +104,30 @@ try:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🟢 ABSEN MASUK", use_container_width=True):
-            if id_karyawan and nama:
+            import streamlit as st
+import gspread
+import datetime
+from oauth2client.service_account import ServiceAccountCredentials
+
+# KONEKSI KE GOOGLE SHEET
+try:
+    creds_dict = st.secrets["gcp_service_account"]
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    
+    # GANTI NAMA SPREADSHEET & WORKSHEET SESUAI PUNYA KAMU
+    sheet = client.open("Database Absensi").sheet1 # "Database Absensi" = nama Google Sheet kamu
+    ws_absen = sheet
+    ws_db = client.open("Database Absensi").worksheet("Database") # kalau ada sheet "Database" buat ID
+    
+    db_data = ws_db.get_all_values()
+    db_dict = {row[0].lstrip("0"): row[1] for row in db_data[1:] if row} # asumsi kolom 0=ID, 1=Nama
+    
+except Exception as e:
+    st.error(f"Gagal konek: {e}")
+    st.stop()
+    if id_karyawan and nama:
                 tanggal_cari = waktu_absen.strftime('%d/%m/%Y'); row_index = None
                 for i, row in enumerate(all_data[1:], start=2):
                     if row[0].lstrip("'").lstrip('0') == id_cari and row[1].startswith(tanggal_cari): row_index = i; break
