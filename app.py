@@ -81,20 +81,13 @@ def bulat_pulang(dt_obj):
 def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0):
     return f"{total_lembur_jam * multiplier:.2f}"
 
-def tentukan_shift(masuk_dt, pulang_dt, is_libur, is_sabtu_full):
+def tentukan_shift(masuk_dt, pulang_dt): # SHIFT TETAP GA DIUBAH
     total_jam_bersih = ((pulang_dt - masuk_dt).total_seconds() / 3600) - 1
     jam_masuk = masuk_dt.hour
-
-    # RULE BARU SHIFT
-    if is_libur:
-        return "LEMBUR" # Minggu/Tgl Merah
-    if is_sabtu_full:
-        return "SABTU FULL DAY" # Sabtu >= 8 jam
     if 7 <= jam_masuk < 8 and total_jam_bersih >= 10:
         return "LONG SHIFT1 07-18"
     if 19 <= jam_masuk < 20 and total_jam_bersih >= 10:
         return "LONG SHIFT2 19-07"
-
     jam_pulang = pulang_dt.hour * 60 + pulang_dt.minute
     if 900 <= jam_pulang < 1380: # 15:00 - 23:00
         return "SHIFT 1"
@@ -123,15 +116,15 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
         jam_kerja_float = 0.0
         lembur_jam = total_jam_bersih
         lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
-        keterangan = "LEMBUR" # RULE BARU
+        keterangan = "LEMBUR" # RULE BARU KETERANGAN
     elif weekday == 5: # SABTU
         total_jam_bersih = total_jam_mentah
-        keterangan = "SABTU"
+        keterangan = "SABTU" # default sabtu
         jam_efektif = 5.0
         if total_jam_bersih >= 8.0:
             total_jam_bersih -= 1.0 # >=8 jam baru potong
             is_sabtu_full = True
-            keterangan = "SABTU FULL DAY" # RULE BARU
+            keterangan = "SABTU FULL DAY" # RULE BARU KETERANGAN
         lembur_jam = total_jam_bersih - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
         jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
@@ -145,7 +138,7 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
         total_jam_bersih = total_jam_mentah - 1
         if total_jam_bersih < 0: total_jam_bersih = 0
         jam_efektif = 7.0
-        keterangan = "HARI KERJA"
+        keterangan = "HARI KERJA" # RULE BARU KETERANGAN
         lembur_jam = total_jam_bersih - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
         jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
@@ -157,7 +150,7 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
         else: lembur_multiplier = "0.00"
 
     jam_kerja = f"{int(jam_kerja_float)}:00:00"
-    shift_final = tentukan_shift(masuk_bulat, pulang_bulat, is_libur, is_sabtu_full)
+    shift_final = tentukan_shift(masuk_bulat, pulang_bulat) # SHIFT TETAP
     return jam_kerja, lembur_multiplier, shift_final, keterangan
 
 def sudah_absen_masuk(id_kar, tanggal_str, all_data):
@@ -205,8 +198,8 @@ with col2:
                 jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, datetime_str, set_libur)
                 ws_absen.update_cell(row_index, 5, jam_kerja)
                 ws_absen.update_cell(row_index, 6, jam_lembur)
-                ws_absen.update_cell(row_index, 7, shift)
-                ws_absen.update_cell(row_index, 8, ket)
+                ws_absen.update_cell(row_index, 7, shift) # SHIFT TETAP
+                ws_absen.update_cell(row_index, 8, ket) # KETERANGAN YG DIRUBAH
                 st.success(f"✅ Absen Pulang: {datetime_str}")
                 st.info(f"Shift: {shift} | Kerja: {jam_kerja} | Lembur: {jam_lembur} Jam | {ket}")
                 st.cache_data.clear()
