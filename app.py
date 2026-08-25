@@ -7,13 +7,13 @@ st.title("📍 APK ABSENSI KARYAWAN")
 
 try:
     creds_dict = st.secrets["gcp_service_account"]
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     
-    # PAKE ID SHEET BIAR GAK SALAH NAMA
-    SHEET_ID = "https://docs.google.com/spreadsheets/d/1ZNPyue3P6RIX6JXdQW_sFjI9Faq0bEIXBM8i49E_5qQ/edit?usp=drivesdk" 
-    sheet = client.open_by_key(SHEET_ID).sheet1
+    # GANTI DENGAN ID SHEET KAMU
+    SHEET_ID = "1ABCxyz...PASTE_DISINI" 
+    sheet = client.open_by_key(SHEET_ID).worksheet("REKAP")
     
     st.success("✅ Konek ke Google Sheet Berhasil")
 except Exception as e:
