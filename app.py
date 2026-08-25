@@ -23,7 +23,7 @@ def connect_gsheet():
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
-st.success("✅ Konek ke Google Sheet Berhasil")
+st.success("🛜 Konek ke Google Sheet Berhasil")
 
 @st.cache_data(ttl=86400)
 def get_libur_nasional(tahun):
@@ -82,7 +82,7 @@ def tentukan_shift(masuk_dt, pulang_dt):
     if jam_pulang >= 1380 or jam_pulang < 420: return "SHIFT 2"
     return "SHIFT 3"
 
-# FIX: TAMBAH LEMBUR MINGGU
+# FIX UTAMA: LEMBUR MINGGU = KERJA + LEMBUR X2
 def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
     fmt = '%d/%m/%Y %H:%M:%S'; masuk = datetime.strptime(masuk_str, fmt); pulang = datetime.strptime(pulang_str, fmt)
@@ -91,19 +91,21 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     tanggal_api_format = masuk.strftime('%Y-%m-%d'); weekday = masuk.weekday()
     nama_libur = dict_libur.get(tanggal_api_format, "")
 
-    # RULE KHUSUS MENU EDIT
+    # RULE KHUS MENU EDIT
     if is_edit:
         potong_istirahat_edit = 1.0 if total_jam_mentah >= 8 else 0.0
-        lembur_jam_edit = total_jam_mentah - potong_istirahat_edit
-        if lembur_jam_edit < 0: lembur_jam_edit = 0
+        jam_kerja_bersih = total_jam_mentah - potong_istirahat_edit
+        if jam_kerja_bersih < 0: jam_kerja_bersih = 0
 
         if status_hari == "TUKAR HARI":
-            return "0:00:00", hitung_lembur_multiplier(lembur_jam_edit, 2.0), tentukan_shift(masuk_bulat, pulang_bulat), "TUKAR HARI"
+            return "0:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), "TUKAR HARI"
         if status_hari == "LIBUR":
             ket = f"LEMBUR {nama_libur}" if nama_libur else "LEMBUR"
-            return "0:00:00", hitung_lembur_multiplier(lembur_jam_edit, 2.0), tentukan_shift(masuk_bulat, pulang_bulat), ket
-        if status_hari == "LEMBUR MINGGU": # BARU
-            return "0:00:00", hitung_lembur_multiplier(lembur_jam_edit, 2.0), tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
+            return "0:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), ket
+        if status_hari == "LEMBUR MINGGU": # FIX INI
+            jam_kerja = f"{int(jam_kerja_bersih)}:00:00"
+            lembur_multiplier = hitung_lembur_multiplier(jam_kerja_bersih, 2.0) # x2
+            return jam_kerja, lembur_multiplier, tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
 
     # RULE LAMA UNTUK ABSEN NORMAL
     is_libur_api = (weekday == 6) or (tanggal_api_format in dict_libur)
@@ -225,10 +227,7 @@ with menu[1]:
                     jam_pulang_lama = datetime.strptime(ws_absen.cell(row_index_asli, 3).value, '%d/%m/%Y %H:%M:%S')
                     jam_pulang_baru_tgl = st.date_input("Tanggal Pulang Baru", jam_pulang_lama.date(), key="edit_tgl_pulang")
                     jam_pulang_baru_jam = st.time_input("Jam Pulang Baru", jam_pulang_lama.time(), key="edit_jam_pulang")
-
-                # TAMBAH LEMBUR MINGGU DISINI
                 status_baru = st.selectbox("Status Hari Baru", ["NORMAL", "TUKAR HARI", "LIBUR", "LEMBUR MINGGU"], key="status_edit")
-
                 if st.button("💾 SIMPAN PERUBAHAN", use_container_width=True):
                     jam_masuk_baru = datetime.combine(jam_masuk_baru_tgl, jam_masuk_baru_jam).strftime('%d/%m/%Y %H:%M:%S')
                     jam_pulang_baru = datetime.combine(jam_pulang_baru_tgl, jam_pulang_baru_jam).strftime('%d/%m/%Y %H:%M:%S')
