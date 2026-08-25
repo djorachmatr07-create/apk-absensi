@@ -81,15 +81,26 @@ def bulat_pulang(dt_obj):
 def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0):
     return f"{total_lembur_jam * multiplier:.2f}"
 
-def tentukan_shift(masuk_dt, pulang_dt):
+def tentukan_shift(masuk_dt, pulang_dt, is_libur, is_sabtu_full):
     total_jam_bersih = ((pulang_dt - masuk_dt).total_seconds() / 3600) - 1
     jam_masuk = masuk_dt.hour
-    if 7 <= jam_masuk < 8 and total_jam_bersih >= 10: return "LONG SHIFT1 07-18"
-    if 19 <= jam_masuk < 20 and total_jam_bersih >= 10: return "LONG SHIFT2 19-07"
+
+    # RULE BARU SHIFT
+    if is_libur:
+        return "LEMBUR" # Minggu/Tgl Merah
+    if is_sabtu_full:
+        return "SABTU FULL DAY" # Sabtu >= 8 jam
+    if 7 <= jam_masuk < 8 and total_jam_bersih >= 10:
+        return "LONG SHIFT1 07-18"
+    if 19 <= jam_masuk < 20 and total_jam_bersih >= 10:
+        return "LONG SHIFT2 19-07"
+
     jam_pulang = pulang_dt.hour * 60 + pulang_dt.minute
-    if 900 <= jam_pulang < 1380: return "SHIFT 1"
-    if jam_pulang >= 1380 or jam_pulang < 420: return "SHIFT 2"
-    return "SHIFT 3"
+    if 900 <= jam_pulang < 1380: # 15:00 - 23:00
+        return "SHIFT 1"
+    if jam_pulang >= 1380 or jam_pulang < 420: # 23:00 - 07:00
+        return "SHIFT 2"
+    return "SHIFT 3" # 07:00 - 15:00
 
 def hitung_jam(masuk_str, pulang_str, set_libur):
     if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
@@ -103,6 +114,7 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
     tanggal_api_format = masuk.strftime('%Y-%m-%d')
     weekday = masuk.weekday()
     is_libur = (weekday == 6) or (tanggal_api_format in set_libur)
+    is_sabtu_full = False
     keterangan = ""
 
     if is_libur:
@@ -111,12 +123,15 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
         jam_kerja_float = 0.0
         lembur_jam = total_jam_bersih
         lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
-        keterangan = "LIBUR NASIONAL" if tanggal_api_format in set_libur else "MINGGU"
+        keterangan = "LEMBUR" # RULE BARU
     elif weekday == 5: # SABTU
         total_jam_bersih = total_jam_mentah
         keterangan = "SABTU"
         jam_efektif = 5.0
-        if total_jam_bersih >= 8.0: total_jam_bersih -= 1.0 # >=8 jam baru potong
+        if total_jam_bersih >= 8.0:
+            total_jam_bersih -= 1.0 # >=8 jam baru potong
+            is_sabtu_full = True
+            keterangan = "SABTU FULL DAY" # RULE BARU
         lembur_jam = total_jam_bersih - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
         jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
@@ -142,11 +157,10 @@ def hitung_jam(masuk_str, pulang_str, set_libur):
         else: lembur_multiplier = "0.00"
 
     jam_kerja = f"{int(jam_kerja_float)}:00:00"
-    shift_final = tentukan_shift(masuk_bulat, pulang_bulat)
+    shift_final = tentukan_shift(masuk_bulat, pulang_bulat, is_libur, is_sabtu_full)
     return jam_kerja, lembur_multiplier, shift_final, keterangan
 
 def sudah_absen_masuk(id_kar, tanggal_str, all_data):
-    # cek apakah di tanggal yg sama sudah ada jam masuk
     for row in all_data[1:]:
         if row[0] == id_kar and row[1]:
             tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
@@ -169,7 +183,6 @@ tanggal_hari_ini = waktu_absen.strftime('%d/%m/%Y')
 with col1:
     if st.button("ABSEN MASUK", use_container_width=True):
         if id_karyawan and nama:
-            # VALIDASI 1: Cek sudah absen masuk hari ini belum
             if sudah_absen_masuk(id_karyawan, tanggal_hari_ini, all_data):
                 st.error(f"❌ Gagal! {nama} sudah absen masuk di tanggal {tanggal_hari_ini}")
             else:
