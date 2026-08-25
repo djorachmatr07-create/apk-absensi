@@ -17,7 +17,7 @@ def connect_gsheet():
     return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN")
 
 ws_absen, ws_db = connect_gsheet()
-st.success("✅ Konek ke Google Sheet Berhasil")
+st.success("🛜 Konek ke Google Sheet Berhasil")
 
 # 2. AMBIL DATA LIBUR NASIONAL DARI API
 @st.cache_data(ttl=86400)
@@ -45,7 +45,39 @@ headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
-# 5. INPUT ID + AUTO NAMA
+# 5. FUNGSI AUTO LIBUR MINGGU 23:59
+def auto_libur_minggu():
+    all_data = ws_absen.get_all_values()
+    karyawan_ids = list(db_dict.keys())
+    hari_ini = datetime.now()
+
+    # cek 7 hari kebelakang
+    for i in range(7):
+        tgl_cek = hari_ini - timedelta(days=i)
+        if tgl_cek.weekday() == 6: # 6 = Minggu
+            tgl_str = tgl_cek.strftime('%d/%m/%Y')
+            tgl_api = tgl_cek.strftime('%Y-%m-%d')
+            jam_23_59 = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
+
+            for id_kar in karyawan_ids:
+                sudah_absen = False
+                for row in all_data[1:]:
+                    if row[0] == id_kar and row[1]:
+                        tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+                        if tgl_db == tgl_str:
+                            sudah_absen = True
+                            break
+
+                # kalau belum absen sama sekali di hari minggu itu
+                if not sudah_absen:
+                    row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", "LIBUR", "LIBUR OTOMATIS"]
+                    ws_absen.append_row(row_baru, value_input_option='USER_ENTERED')
+    st.cache_data.clear()
+
+# Jalankan auto cek saat buka app
+auto_libur_minggu()
+
+# 6. INPUT ID + AUTO NAMA
 id_karyawan = st.text_input("1. Masukkan ID Karyawan")
 nama = ""
 if id_karyawan:
@@ -57,7 +89,7 @@ if id_karyawan:
 
 st.markdown("---")
 
-# 6. PILIH JAM MANUAL / OTOMATIS
+# 7. PILIH JAM MANUAL / OTOMATIS
 opsi_jam = st.radio("3. Waktu Absen:", ["Jam Sekarang", "Pilih Hari & Jam Manual"], horizontal=True, key="opsi")
 if opsi_jam == "Jam Sekarang":
     waktu_absen = datetime.now()
@@ -69,17 +101,12 @@ else:
         jam = st.time_input("Pilih Jam", value=datetime.now().time(), key="jam")
     waktu_absen = datetime.combine(tanggal, jam)
 
-# 7. PILIHAN BARU: STATUS HARI
-status_hari = st.selectbox(
-    "4. Status Hari",
-    ["NORMAL", "TUKAR HARI", "LIBUR"],
-    help="NORMAL = hari biasa. TUKAR HARI = hari kerja dipindah. LIBUR = paksa lembur x2"
-)
-
+# 8. PILIHAN STATUS HARI
+status_hari = st.selectbox("4. Status Hari", ["NORMAL", "TUKAR HARI", "LIBUR"], help="NORMAL = hari biasa. TUKAR HARI = hari kerja dipindah. LIBUR = paksa lembur x2")
 st.text_input("5. SHIFT OTOMATIS", value="Akan ditentukan saat pulang", disabled=True)
 set_libur = get_libur_nasional(waktu_absen.year)
 
-# 8. FUNGSI BANTU LENGKAP
+# 9. FUNGSI BANTU
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
         return (dt_obj + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
@@ -114,40 +141,27 @@ def hitung_jam(masuk_str, pulang_str, set_libur, status_hari):
     weekday = masuk.weekday()
     is_libur_api = (weekday == 6) or (tanggal_api_format in set_libur)
 
-    # RULE BARU: PRIORITAS STATUS HARI
     is_libur = False
     keterangan = ""
-
-    if status_hari == "LIBUR": # Paksa lembur
-        is_libur = True
-        keterangan = "LEMBUR"
-    elif status_hari == "TUKAR HARI": # Hari libur jadi kerja normal
-        is_libur = False
-        keterangan = "TUKAR HARI"
-    else: # NORMAL
+    if status_hari == "LIBUR":
+        is_libur = True; keterangan = "LEMBUR"
+    elif status_hari == "TUKAR HARI":
+        is_libur = False; keterangan = "TUKAR HARI"
+    else:
         is_libur = is_libur_api
         if is_libur: keterangan = "LEMBUR"
         elif weekday == 5: keterangan = "SABTU"
         else: keterangan = "HARI KERJA"
 
-    is_sabtu_full = False
-    jam_kerja_float = 0.0
-    lembur_jam = 0.0
-    lembur_multiplier = "0.00"
-
+    jam_kerja_float = 0.0; lembur_jam = 0.0; lembur_multiplier = "0.00"
     if is_libur:
         total_jam_bersih = total_jam_mentah - 1
         if total_jam_bersih < 0: total_jam_bersih = 0
-        jam_kerja_float = 0.0
-        lembur_jam = total_jam_bersih
+        jam_kerja_float = 0.0; lembur_jam = total_jam_bersih
         lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
-    elif weekday == 5 and status_hari == "NORMAL": # SABTU NORMAL
-        total_jam_bersih = total_jam_mentah
-        jam_efektif = 5.0
-        if total_jam_bersih >= 8.0:
-            total_jam_bersih -= 1.0
-            is_sabtu_full = True
-            keterangan = "SABTU FULL DAY"
+    elif weekday == 5 and status_hari == "NORMAL":
+        total_jam_bersih = total_jam_mentah; jam_efektif = 5.0
+        if total_jam_bersih >= 8.0: total_jam_bersih -= 1.0; keterangan = "SABTU FULL DAY"
         lembur_jam = total_jam_bersih - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
         jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
@@ -156,7 +170,7 @@ def hitung_jam(masuk_str, pulang_str, set_libur, status_hari):
             sisa = lembur_jam - jam_pertama
             lembur_efektif = (jam_pertama * 1.5) + (sisa * 2.0)
             lembur_multiplier = f"{lembur_efektif:.2f}"
-    else: # SENIN - JUMAT / TUKAR HARI
+    else:
         total_jam_bersih = total_jam_mentah - 1
         if total_jam_bersih < 0: total_jam_bersih = 0
         jam_efektif = 7.0
@@ -177,33 +191,29 @@ def sudah_absen_masuk(id_kar, tanggal_str, all_data):
     for row in all_data[1:]:
         if row[0] == id_kar and row[1]:
             tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
-            if tgl_db == tanggal_str:
-                return True
+            if tgl_db == tanggal_str: return True
     return False
 
 def cari_data_belum_pulang(id_kar, all_data):
     for i in range(len(all_data)-1, 0, -1):
         row = all_data[i]
-        if row[0] == id_kar and row[2] == "":
-            return i + 1
+        if row[0] == id_kar and row[2] == "": return i + 1
     return None
 
-# 9. TOMBOL ABSEN + RECALCULATE
-col1, col2, col3 = st.columns(3)
+# 10. TOMBOL ABSEN + RECALCULATE + CEK LIBUR
+col1, col2, col3, col4 = st.columns(4)
 all_data = ws_absen.get_all_values()
 tanggal_hari_ini = waktu_absen.strftime('%d/%m/%Y')
 
 with col1:
     if st.button("ABSEN MASUK", use_container_width=True):
         if id_karyawan and nama:
-            if sudah_absen_masuk(id_karyawan, tanggal_hari_ini, all_data):
-                st.error(f"❌ Gagal! {nama} sudah absen masuk di tanggal {tanggal_hari_ini}")
+            if sudah_absen_masuk(id_karyawan, tanggal_hari_ini, all_data): st.error(f"❌ Gagal! {nama} sudah absen masuk di tanggal {tanggal_hari_ini}")
             else:
                 datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
                 row = [id_karyawan, datetime_str, "", nama, "", "0.00", "", ""]
                 ws_absen.append_row(row, value_input_option='USER_ENTERED')
-                st.success(f"✅ Absen Masuk: {datetime_str}")
-                st.cache_data.clear()
+                st.success(f"✅ Absen Masuk: {datetime_str}"); st.cache_data.clear()
         else: st.warning("Isi ID yang benar dulu min")
 
 with col2:
@@ -215,16 +225,27 @@ with col2:
                 jam_masuk = ws_absen.cell(row_index, 2).value
                 ws_absen.update_cell(row_index, 3, datetime_str)
                 jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, datetime_str, set_libur, status_hari)
-                ws_absen.update_cell(row_index, 5, jam_kerja)
-                ws_absen.update_cell(row_index, 6, jam_lembur)
-                ws_absen.update_cell(row_index, 7, shift)
-                ws_absen.update_cell(row_index, 8, ket)
+                ws_absen.update_cell(row_index, 5, jam_kerja); ws_absen.update_cell(row_index, 6, jam_lembur)
+                ws_absen.update_cell(row_index, 7, shift); ws_absen.update_cell(row_index, 8, ket)
                 st.success(f"✅ Absen Pulang: {datetime_str}")
-                st.info(f"Shift: {shift} | Kerja: {jam_kerja} | Lembur: {jam_lembur} Jam | {ket}")
-                st.cache_data.clear()
+                st.info(f"Shift: {shift} | Kerja: {jam_kerja} | Lembur: {jam_lembur} Jam | {ket}"); st.cache_data.clear()
             else: st.error("❌ Tidak ada data absen masuk yg belum pulang")
         else: st.warning("Isi ID yang benar dulu min")
 
 with col3:
     if st.button("🔄 RECALCULATE", use_container_width=True):
-        st.info("Pilih status hari dulu baru klik ini")
+        if id_karyawan and nama:
+            for i in range(len(all_data)-1, 0, -1):
+                if all_data[i][0] == id_karyawan and all_data[i][2]!= "":
+                    row_index = i + 1; jam_masuk = ws_absen.cell(row_index, 2).value; jam_pulang = ws_absen.cell(row_index, 3).value
+                    jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, set_libur, status_hari)
+                    ws_absen.update_cell(row_index, 5, jam_kerja); ws_absen.update_cell(row_index, 6, jam_lembur)
+                    ws_absen.update_cell(row_index, 7, shift); ws_absen.update_cell(row_index, 8, ket)
+                    st.success(f"✅ Data {jam_masuk} berhasil dihitung ulang"); st.cache_data.clear(); break
+            else: st.error("Data tidak ditemukan")
+        else: st.warning("Isi ID yang benar dulu min")
+
+with col4:
+    if st.button("⛪ CEK LIBUR", use_container_width=True):
+        auto_libur_minggu()
+        st.success("✅ Cek libur otomatis selesai")
