@@ -24,7 +24,12 @@ except Exception as e:
 data_db = ws_db.get_all_records()
 db_dict = {str(row['ID KARYAWAN']).lstrip('0'): row['NAMA'] for row in data_db}
 
-# 3. INPUT ID + AUTO NAMA
+# 3. PASTIIN HEADER BENAR: TANPA JAM LEMBUR
+headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "SHIFT"]
+if ws_absen.row_values(1)!= headers:
+    ws_absen.update('A1:F1', [headers])
+
+# 4. INPUT ID + AUTO NAMA
 id_karyawan = st.text_input("Masukkan ID Karyawan")
 nama = ""
 if id_karyawan:
@@ -36,7 +41,7 @@ if id_karyawan:
         st.error("ID tidak ditemukan di DATABASE KARYAWAN")
 
 st.markdown("---")
-# 4. PILIH JAM MANUAL / OTOMATIS
+# 5. PILIH JAM MANUAL / OTOMATIS
 opsi_jam = st.radio("Waktu Absen:", ["Jam Sekarang", "Jam Manual"], horizontal=True)
 if opsi_jam == "Jam Sekarang":
     waktu_absen = datetime.now()
@@ -46,7 +51,7 @@ else:
     waktu_absen = datetime.combine(tanggal, jam)
 datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
 
-# 5. FUNGSI HITUNG
+# 6. FUNGSI HITUNG 7 JAM KERJA
 def hitung_shift(masuk, pulang):
     total_jam = (pulang - masuk).total_seconds() / 3600 - 1 # -1 jam istirahat
     jam_masuk = masuk.hour
@@ -57,25 +62,22 @@ def hitung_shift(masuk, pulang):
     if jam_pulang >= 1380 or jam_pulang < 420: return "SHIFT 2"
     return "SHIFT 3"
 
-def hitung_jam(masuk_str, pulang_str):
+def hitung_jam_kerja(masuk_str, pulang_str):
     fmt = '%d/%m/%Y %H:%M:%S'
     masuk = datetime.strptime(masuk_str, fmt)
     pulang = datetime.strptime(pulang_str, fmt)
-    total_jam = (pulang - masuk).total_seconds() / 3600 - 1
-    jam_kerja = 7.0 if total_jam >= 7 else total_jam
-    lembur = total_jam - 7.0
-    if lembur < 0: lembur = 0
-    lembur_efektif = 1.5 if lembur <= 1 else 1.5 + (lembur - 1) * 2
-    return f"{int(jam_kerja)}:00:00", f"{lembur_efektif:.2f}", hitung_shift(masuk, pulang)
+    total_jam = (pulang - masuk).total_seconds() / 3600 - 1 # KURANGI 1 JAM ISTIRAHAT
+    if total_jam < 0: total_jam = 0
+    jam_kerja = 7.0 if total_jam >= 7 else total_jam # MAX 7 JAM
+    return f"{int(jam_kerja)}:00:00", hitung_shift(masuk, pulang)
 
-# 6. TOMBOL ABSEN
+# 7. TOMBOL ABSEN
 col1, col2 = st.columns(2)
 all_data = ws_absen.get_all_values()
 
 with col1:
     if st.button("Absen Masuk", use_container_width=True):
         if id_karyawan and nama:
-            next_row = len(all_data) + 1
             row = [f"'{id_karyawan}", datetime_str, "", nama, "", ""]
             ws_absen.append_row(row, value_input_option='USER_ENTERED')
             st.success(f"✅ Absen Masuk: {datetime_str}")
@@ -92,11 +94,10 @@ with col2:
             if row_index:
                 jam_masuk = ws_absen.cell(row_index, 2).value
                 ws_absen.update_cell(row_index, 3, datetime_str)
-                jam_kerja, jam_lembur, shift = hitung_jam(jam_masuk, datetime_str)
+                jam_kerja, shift = hitung_jam_kerja(jam_masuk, datetime_str)
                 ws_absen.update_cell(row_index, 5, jam_kerja)
-                ws_absen.update_cell(row_index, 6, jam_lembur)
-                ws_absen.update_cell(row_index, 7, shift)
+                ws_absen.update_cell(row_index, 6, shift)
                 st.success(f"✅ Absen Pulang: {datetime_str}")
-                st.info(f"Shift: {shift} | Kerja: {jam_kerja} | Lembur: {jam_lembur} Jam")
+                st.info(f"Shift: {shift} | Jam Kerja: {jam_kerja}")
             else:
                 st.error("Belum absen masuk")
