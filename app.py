@@ -42,7 +42,7 @@ def load_db():
     db = {}
     for row in all_values[1:]:
         id_kar_raw = str(row[0]).strip()
-        id_kar = id_kar_raw.zfill(8) # PASTIKAN 8 DIGIT
+        id_kar = id_kar_raw.zfill(8)
         nama = str(row[1]).strip()
         db[id_kar] = nama
     return db
@@ -159,7 +159,7 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX ANTI DOBEL
+def auto_absen_23_59():
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
@@ -181,7 +181,7 @@ def auto_absen_23_59(): # FIX ANTI DOBEL
         is_hari_kerja = not is_minggu and not is_tgl_merah
         for id_kar in karyawan_ids:
             key_cek = f"{id_kar}_{jam_23_59}"
-            if key_cek in data_exist: continue # SKIP KALAU UDAH ADA
+            if key_cek in data_exist: continue
 
             if is_tgl_merah: keterangan = f"LIBUR NASIONAL: {nama_libur}"
             elif is_minggu: keterangan = "LIBUR MINGGU OTOMATIS"
@@ -239,7 +239,7 @@ with menu[1]:
 
 with menu[0]:
     id_karyawan_raw = st.text_input("1. Masukkan ID Karyawan", key="id_absen").strip()
-    id_karyawan = id_karyawan_raw.zfill(8) # PENTING: 8 DIGIT
+    id_karyawan = id_karyawan_raw.zfill(8)
     nama = ""
     if id_karyawan_raw:
         nama = db_dict.get(id_karyawan, "")
@@ -291,7 +291,7 @@ with menu[0]:
                 else: st.error("❌ Tidak ada data absen masuk yg belum pulang")
             else: st.warning("Isi ID yang benar dulu min")
 
-    with col3: # BATCH UPDATE
+    with col3:
         if st.button("🔄 RECALCULATE SEMUA", use_container_width=True):
             if id_karyawan_raw and nama:
                 dict_libur = get_libur_nasional(datetime.now().year)
@@ -313,12 +313,13 @@ with menu[0]:
                         cell_list.append(gspread.Cell(row_index, 7, shift))
                         cell_list.append(gspread.Cell(row_index, 8, ket))
                         hitung += 1
-            if cell_list:
-                ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED')
-            sort_by_tanggal()
-            st.success(f"✅ {hitung} data berhasil dihitung ulang")
-            st.cache_data.clear()
-            else: st.warning("Isi ID yang benar dulu min")
+                if cell_list:
+                    ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED')
+                    sort_by_tanggal()
+                    st.success(f"✅ {hitung} data berhasil dihitung ulang")
+                    st.cache_data.clear()
+            else:
+                st.warning("Isi ID yang benar dulu min")
 
     with col4:
         if st.button("⛪ CEK LIBUR/ALPA", use_container_width=True):
