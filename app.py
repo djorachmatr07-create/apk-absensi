@@ -34,6 +34,7 @@ def get_libur_nasional(tahun):
         dict_libur = {item['holiday_date']: item['holiday_name'] for item in data}
         return dict_libur
     except:
+        st.warning("Gagal ambil data libur nasional. Cek internet")
         return {}
 
 @st.cache_data(ttl=300)
@@ -104,15 +105,18 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
             lembur_multiplier = hitung_lembur_multiplier(jam_kerja_bersih, 2.0)
             return jam_kerja, lembur_multiplier, tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
 
-    is_libur_api = (weekday == 6) or (tanggal_api_format in dict_libur)
     is_libur = False; keterangan = ""
     if status_hari == "LIBUR": is_libur = True; keterangan = "LIBUR"
     elif status_hari == "TUKAR HARI": is_libur = False; keterangan = "TUKAR HARI"
     else:
-        if nama_libur: is_libur = True; keterangan = nama_libur
-        elif weekday == 6: is_libur = True; keterangan = "LIBUR MINGGU"
-        elif weekday == 5: is_libur = False; keterangan = "SABTU"
-        else: is_libur = False; keterangan = "HARI KERJA"
+        if nama_libur:
+            is_libur = True; keterangan = f"LIBUR NASIONAL: {nama_libur}" # NAMA LIBUR MUNCUL
+        elif weekday == 6:
+            is_libur = True; keterangan = "LIBUR MINGGU"
+        elif weekday == 5:
+            is_libur = False; keterangan = "SABTU"
+        else:
+            is_libur = False; keterangan = "HARI KERJA"
 
     jam_kerja_float = 0.0; lembur_jam = 0.0; lembur_multiplier = "0.00"
     potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
@@ -159,7 +163,7 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59():
+def auto_absen_23_59(): # FIX: KETERANGAN NGIKUT KALENDER
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
@@ -183,11 +187,17 @@ def auto_absen_23_59():
             key_cek = f"{id_kar}_{jam_23_59}"
             if key_cek in data_exist: continue
 
-            if is_tgl_merah: keterangan = f"LIBUR NASIONAL: {nama_libur}"
-            elif is_minggu: keterangan = "LIBUR MINGGU OTOMATIS"
-            elif is_hari_kerja: keterangan = "ALPA"
+            if is_tgl_merah:
+                keterangan = f"LIBUR NASIONAL: {nama_libur}" # NAMA LIBUR KELUAR
+                shift = "LIBUR"
+            elif is_minggu:
+                keterangan = "LIBUR MINGGU OTOMATIS"
+                shift = "LIBUR"
+            elif is_hari_kerja:
+                keterangan = "ALPA"
+                shift = "ALPA"
             else: continue
-            row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", "ALPA" if is_hari_kerja else "LIBUR", keterangan]
+            row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan]
             ws_absen.insert_row(row_baru, 2, value_input_option='USER_ENTERED')
     sort_by_tanggal(); st.cache_data.clear()
 
@@ -291,7 +301,7 @@ with menu[0]:
                 else: st.error("❌ Tidak ada data absen masuk yg belum pulang")
             else: st.warning("Isi ID yang benar dulu min")
 
-    with col3:
+    with col3: # RECALCULATE NGIKUT KALENDER
         if st.button("🔄 RECALCULATE SEMUA", use_container_width=True):
             if id_karyawan_raw and nama:
                 dict_libur = get_libur_nasional(datetime.now().year)
@@ -302,12 +312,10 @@ with menu[0]:
                         row_index = i + 1
                         jam_masuk = ws_absen.cell(row_index, 2).value
                         jam_pulang = ws_absen.cell(row_index, 3).value
-                        ket_lama = ws_absen.cell(row_index, 8).value
-                        if "TUKAR HARI" in ket_lama: status = "TUKAR HARI"
-                        elif "LIBUR" in ket_lama: status = "LIBUR"
-                        elif "LEMBUR MINGGU" in ket_lama: status = "LEMBUR MINGGU"
-                        else: status = "NORMAL"
-                        jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, dict_libur, status, is_edit=False)
+
+                        # PENTING: Hitung ulang paksa pakai NORMAL biar cek kalender
+                        jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, dict_libur, "NORMAL", is_edit=False)
+
                         cell_list.append(gspread.Cell(row_index, 5, jam_kerja))
                         cell_list.append(gspread.Cell(row_index, 6, jam_lembur))
                         cell_list.append(gspread.Cell(row_index, 7, shift))
@@ -316,7 +324,7 @@ with menu[0]:
                 if cell_list:
                     ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED')
                     sort_by_tanggal()
-                    st.success(f"✅ {hitung} data berhasil dihitung ulang")
+                    st.success(f"✅ {hitung} data berhasil dihitung ulang sesuai kalender")
                     st.cache_data.clear()
             else:
                 st.warning("Isi ID yang benar dulu min")
