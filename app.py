@@ -11,7 +11,7 @@ try:
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    sheet = client.open("Database Absensi").sheet1 # GANTI NAMA GOOGLE SHEET KAMU
+    sheet = client.open("REKAP").sheet1 # GANTI NAMA GOOGLE SHEET KAMU
     
 except Exception as e:
     st.error(f"Gagal konek: {e}")
