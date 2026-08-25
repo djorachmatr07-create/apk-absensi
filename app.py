@@ -6,6 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 st.set_page_config(page_title="APK ABSENSI", layout="centered")
 st.title("📍 APK ABSENSI KARYAWAN")
 
+# 1. KONEK KE SHEET
 try:
     creds_dict = st.secrets["gcp_service_account"]
     scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets', "https://www.googleapis.com/auth/drive"]
@@ -19,13 +20,16 @@ except Exception as e:
     st.error(f"Gagal konek: {e}")
     st.stop()
 
+# 2. BACA DATABASE NAMA
 data_db = ws_db.get_all_records()
 db_dict = {str(row['ID KARYAWAN']).lstrip('0'): row['NAMA'] for row in data_db}
 
+# 3. PASTIIN HEADER
 headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "JAM LEMBUR", "SHIFT"]
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:G1', [headers])
 
+# 4. INPUT ID + AUTO NAMA
 id_karyawan = st.text_input("1. Masukkan ID Karyawan")
 nama = ""
 if id_karyawan:
@@ -37,7 +41,7 @@ if id_karyawan:
         st.error("ID tidak ditemukan di DATABASE KARYAWAN")
 
 st.markdown("---")
-# PILIHAN GANTI HARI
+# 5. PILIH JAM MANUAL / OTOMATIS
 opsi_jam = st.radio("3. Waktu Absen:", ["Jam Sekarang", "Pilih Hari & Jam Manual"], horizontal=True)
 if opsi_jam == "Jam Sekarang":
     waktu_absen = datetime.now()
@@ -49,6 +53,7 @@ else:
 datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
 st.text_input("4. SHIFT OTOMATIS", value="Akan ditentukan saat pulang", disabled=True)
 
+# 6. FUNGSI BANTU
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
         return (dt_obj + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
@@ -57,16 +62,19 @@ def bulat_masuk(dt_obj):
 def bulat_pulang(dt_obj):
     return dt_obj.replace(minute=0, second=0, microsecond=0)
 
-def hitung_lembur_multiplier(total_lembur_jam):
+def hitung_lembur_multiplier(total_lembur_jam, is_minggu=False):
     jam_lembur_efektif = 0.0
     sisa = total_lembur_jam
     jam_ke = 1
     while sisa > 0:
         ambil = 1.0 if sisa >= 1 else sisa
-        if jam_ke == 1:
-            jam_lembur_efektif += ambil * 1.5 # K1 x 1.5
+        if is_minggu:
+            jam_lembur_efektif += ambil * 2.0 # MINGGU LANGSUNG X2
         else:
-            jam_lembur_efektif += ambil * 2.0 # K2 dst x 2
+            if jam_ke == 1:
+                jam_lembur_efektif += ambil * 1.5 # K1 x 1.5
+            else:
+                jam_lembur_efektif += ambil * 2.0 # K2 dst x 2
         sisa -= ambil
         jam_ke += 1
     return f"{jam_lembur_efektif:.2f}"
@@ -75,50 +83,54 @@ def tentukan_shift(masuk_dt, pulang_dt):
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
     total_jam_bersih = total_jam_mentah - 1 # -1 jam istirahat
     jam_masuk = masuk_dt.hour
-    
-    if 7 <= jam_masuk < 8 and total_jam_bersih >= 10:
-        return "LONG SHIFT1 07-18"
-    elif 19 <= jam_masuk < 20 and total_jam_bersih >= 10:
-        return "LONG SHIFT2 19-07"
-    
-    jam_pulang = pulang_dt.hour
-    menit_pulang = pulang_dt.minute
-    total_menit_pulang = jam_pulang * 60 + menit_pulang
-    
-    if 900 <= total_menit_pulang < 1380:
-        return "SHIFT 1"
-    elif total_menit_pulang >= 1380 or total_menit_pulang < 420:
-        return "SHIFT 2"
-    else:
-        return "SHIFT 3"
+
+    if 7 <= jam_masuk < 8 and total_jam_bersih >= 10: return "LONG SHIFT1 07-18"
+    if 19 <= jam_masuk < 20 and total_jam_bersih >= 10: return "LONG SHIFT2 19-07"
+
+    jam_pulang = pulang_dt.hour * 60 + pulang_dt.minute
+    if 900 <= jam_pulang < 1380: return "SHIFT 1"
+    if jam_pulang >= 1380 or jam_pulang < 420: return "SHIFT 2"
+    return "SHIFT 3"
 
 def hitung_jam(masuk_str, pulang_str):
-    if not masuk_str or not pulang_str:
-        return "7:00:00", "0.00", ""
+    if not masuk_str or not pulang_str: return "7:00:00", "0.00", ""
     fmt = '%d/%m/%Y %H:%M:%S'
     masuk = datetime.strptime(masuk_str, fmt)
     pulang = datetime.strptime(pulang_str, fmt)
-    
+
     masuk_bulat = bulat_masuk(masuk)
     pulang_bulat = bulat_pulang(pulang)
-    
+
     total_jam_mentah = pulang_bulat - masuk_bulat
     total_jam_bersih = total_jam_mentah - timedelta(hours=1) # KURANGI 1 JAM ISTIRAHAT
     total_jam_float = total_jam_bersih.total_seconds() / 3600
     if total_jam_float < 0: total_jam_float = 0
-    
-    # CEK APAKAH SABTU
-    jam_efektif = 5.0 if masuk.weekday() == 5 else 7.0 # 5=Sabtu, 6=Minggu
-    
-    jam_kerja_float = jam_efektif if total_jam_float >= jam_efektif else total_jam_float
-    lembur_jam = total_jam_float - jam_efektif
+
+    weekday = masuk.weekday() # 0=Senin, 5=Sabtu, 6=Minggu
+
+    # ATURAN KERJA
+    if weekday == 6: # MINGGU = 7 JAM TAPI LEMBUR X2
+        jam_efektif = 7.0
+        lembur_jam = total_jam_float - jam_efektif
+        is_minggu = True
+    elif weekday == 5: # SABTU = 5 JAM
+        jam_efektif = 5.0
+        lembur_jam = total_jam_float - jam_efektif
+        is_minggu = False
+    else: # SENIN-JUMAT = 7 JAM
+        jam_efektif = 7.0
+        lembur_jam = total_jam_float - jam_efektif
+        is_minggu = False
+
     if lembur_jam < 0: lembur_jam = 0
-    
+    jam_kerja_float = jam_efektif if total_jam_float >= jam_efektif else total_jam_float
+
     jam_kerja = f"{int(jam_kerja_float)}:00:00"
-    lembur_multiplier = hitung_lembur_multiplier(lembur_jam)
+    lembur_multiplier = hitung_lembur_multiplier(lembur_jam, is_minggu)
     shift_final = tentukan_shift(masuk_bulat, pulang_bulat)
     return jam_kerja, lembur_multiplier, shift_final
 
+# 7. TOMBOL ABSEN
 col1, col2 = st.columns(2)
 all_data = ws_absen.get_all_values()
 
