@@ -19,12 +19,11 @@ def connect_gsheet():
     ws_db = sh.worksheet("DATABASE KARYAWAN")
     ws_db.format('A:A', {'numberFormat': {'type': 'TEXT'}})
     ws_absen.format('A:A', {'numberFormat': {'type': 'TEXT'}})
-    # FIX 1: PAKSA KOLOM B DAN C JADI DATETIME BENERAN
     ws_absen.format('B:C', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}})
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
-st.success("😎 Konek ke Google Sheet Berhasil")
+st.success("✅ Konek ke Google Sheet Berhasil")
 
 @st.cache_data(ttl=86400)
 def get_libur_nasional(tahun):
@@ -54,26 +53,18 @@ headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
-# FIX 2: SORT PAKAI PYTHON DULU BARU TIMPA KE SHEET
 def sort_by_tanggal():
     all_data = ws_absen.get_all_values()
     header = all_data[0]
-    data = all_data[1:]
-
-    # Buang baris kosong
-    data = [row for row in data if row[0]!= '']
-
-    # Sort berdasarkan kolom B index 1, dari baru ke lama
+    data = [row for row in all_data[1:] if row[0]!= '']
     try:
         data.sort(key=lambda x: datetime.strptime(x[1], '%d/%m/%Y %H:%M:%S'), reverse=True)
     except:
-        pass # kalau ada data rusak diabaikan
-
-    # Timpa ulang ke sheet
+        pass
     ws_absen.clear()
     ws_absen.update('A1', [header])
     if data:
-        ws_absen.update('A2', data, value_input_option='USER_ENTERED') # USER_ENTERED biar kebaca date
+        ws_absen.update('A2', data, value_input_option='USER_ENTERED')
 
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
@@ -91,13 +82,34 @@ def tentukan_shift(masuk_dt, pulang_dt):
     if jam_pulang >= 1380 or jam_pulang < 420: return "SHIFT 2"
     return "SHIFT 3"
 
-def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari):
+# FIX UTAMA: TAMBAH PARAMETER is_edit
+def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
     fmt = '%d/%m/%Y %H:%M:%S'; masuk = datetime.strptime(masuk_str, fmt); pulang = datetime.strptime(pulang_str, fmt)
     masuk_bulat = bulat_masuk(masuk); pulang_bulat = bulat_pulang(pulang)
     total_jam_mentah = (pulang_bulat - masuk_bulat).total_seconds() / 3600
     tanggal_api_format = masuk.strftime('%Y-%m-%d'); weekday = masuk.weekday()
     nama_libur = dict_libur.get(tanggal_api_format, "")
+
+    # RULE BARU KHUS MENU EDIT
+    if is_edit:
+        if status_hari == "TUKAR HARI":
+            jam_kerja = "0:00:00"
+            lembur_jam = total_jam_mentah - 1
+            if lembur_jam < 0: lembur_jam = 0
+            lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
+            shift_final = tentukan_shift(masuk_bulat, pulang_bulat)
+            return jam_kerja, lembur_multiplier, shift_final, "TUKAR HARI"
+        if status_hari == "LIBUR":
+            jam_kerja = "0:00:00"
+            lembur_jam = total_jam_mentah - 1
+            if lembur_jam < 0: lembur_jam = 0
+            lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
+            shift_final = tentukan_shift(masuk_bulat, pulang_bulat)
+            ket = f"LEMBUR {nama_libur}" if nama_libur else "LEMBUR"
+            return jam_kerja, lembur_multiplier, shift_final, ket
+
+    # RULE LAMA UNTUK ABSEN NORMAL
     is_libur_api = (weekday == 6) or (tanggal_api_format in dict_libur)
     is_libur = False; keterangan = ""
     if status_hari == "LIBUR":
@@ -110,6 +122,7 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari):
         elif weekday == 6: is_libur = True; keterangan = "LIBUR MINGGU"
         elif weekday == 5: is_libur = False; keterangan = "SABTU"
         else: is_libur = False; keterangan = "HARI KERJA"
+
     jam_kerja_float = 0.0; lembur_jam = 0.0; lembur_multiplier = "0.00"
     if is_libur:
         total_jam_bersih = total_jam_mentah - 1;
@@ -177,7 +190,6 @@ def auto_absen_23_59():
                 elif is_hari_kerja: keterangan = "ALPA"
                 else: continue
                 row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", "ALPA" if is_hari_kerja else "LIBUR", keterangan]
-                # GANTI JADI USER_ENTERED BIAR JADI DATE
                 ws_absen.insert_row(row_baru, 2, value_input_option='USER_ENTERED')
     sort_by_tanggal(); st.cache_data.clear()
 
@@ -221,7 +233,8 @@ with menu[1]:
                     dict_libur = get_libur_nasional(jam_masuk_baru_tgl.year)
                     ws_absen.update_cell(row_index_asli, 2, jam_masuk_baru)
                     ws_absen.update_cell(row_index_asli, 3, jam_pulang_baru)
-                    jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk_baru, jam_pulang_baru, dict_libur, status_baru)
+                    # PENTING: KIRIM is_edit=True
+                    jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk_baru, jam_pulang_baru, dict_libur, status_baru, is_edit=True)
                     ws_absen.update_cell(row_index_asli, 5, jam_kerja); ws_absen.update_cell(row_index_asli, 6, jam_lembur)
                     ws_absen.update_cell(row_index_asli, 7, shift); ws_absen.update_cell(row_index_asli, 8, ket)
                     sort_by_tanggal(); st.success("✅ Data berhasil diedit!"); st.cache_data.clear()
@@ -260,7 +273,6 @@ with menu[0]:
                 else:
                     datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
                     row = [id_karyawan, datetime_str, "", nama, "", "0.00", "", ""]
-                    # GANTI JADI USER_ENTERED
                     ws_absen.insert_row(row, 2, value_input_option='USER_ENTERED'); sort_by_tanggal()
                     st.success(f"✅ Absen Masuk: {datetime_str}"); st.cache_data.clear()
             else: st.warning("Isi ID yang benar dulu min")
@@ -273,7 +285,8 @@ with menu[0]:
                     datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
                     jam_masuk = ws_absen.cell(row_index, 2).value
                     ws_absen.update_cell(row_index, 3, datetime_str)
-                    jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, datetime_str, dict_libur, status_hari)
+                    # ABSEN NORMAL is_edit=False
+                    jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, datetime_str, dict_libur, status_hari, is_edit=False)
                     ws_absen.update_cell(row_index, 5, jam_kerja); ws_absen.update_cell(row_index, 6, jam_lembur)
                     ws_absen.update_cell(row_index, 7, shift); ws_absen.update_cell(row_index, 8, ket)
                     sort_by_tanggal()
@@ -288,7 +301,7 @@ with menu[0]:
                 for i in range(len(all_data)-1, 0, -1):
                     if str(all_data[i][0]).strip().zfill(8) == id_karyawan and all_data[i][2]!= "":
                         row_index = i + 1; jam_masuk = ws_absen.cell(row_index, 2).value; jam_pulang = ws_absen.cell(row_index, 3).value
-                        jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, dict_libur, status_hari)
+                        jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, dict_libur, status_hari, is_edit=False)
                         ws_absen.update_cell(row_index, 5, jam_kerja); ws_absen.update_cell(row_index, 6, jam_lembur)
                         ws_absen.update_cell(row_index, 7, shift); ws_absen.update_cell(row_index, 8, ket)
                         sort_by_tanggal()
