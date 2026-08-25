@@ -19,11 +19,12 @@ def connect_gsheet():
     ws_db = sh.worksheet("DATABASE KARYAWAN")
     ws_db.format('A:A', {'numberFormat': {'type': 'TEXT'}})
     ws_absen.format('A:A', {'numberFormat': {'type': 'TEXT'}})
+    # FIX 1: PAKSA KOLOM B DAN C JADI DATETIME BENERAN
     ws_absen.format('B:C', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}})
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
-st.success("🛜 Konek ke Google Sheet Berhasil")
+st.success("😎 Konek ke Google Sheet Berhasil")
 
 @st.cache_data(ttl=86400)
 def get_libur_nasional(tahun):
@@ -42,7 +43,7 @@ def load_db():
     db = {}
     for row in all_values[1:]:
         id_kar_raw = str(row[0]).strip()
-        id_kar = id_kar_raw.zfill(8) # GANTI 8 SESUAI PANJANG ID
+        id_kar = id_kar_raw.zfill(8)
         nama = str(row[1]).strip()
         db[id_kar] = nama
     return db
@@ -53,9 +54,26 @@ headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
+# FIX 2: SORT PAKAI PYTHON DULU BARU TIMPA KE SHEET
 def sort_by_tanggal():
-    try: ws_absen.sort((2, 'des'))
-    except: pass
+    all_data = ws_absen.get_all_values()
+    header = all_data[0]
+    data = all_data[1:]
+
+    # Buang baris kosong
+    data = [row for row in data if row[0]!= '']
+
+    # Sort berdasarkan kolom B index 1, dari baru ke lama
+    try:
+        data.sort(key=lambda x: datetime.strptime(x[1], '%d/%m/%Y %H:%M:%S'), reverse=True)
+    except:
+        pass # kalau ada data rusak diabaikan
+
+    # Timpa ulang ke sheet
+    ws_absen.clear()
+    ws_absen.update('A1', [header])
+    if data:
+        ws_absen.update('A2', data, value_input_option='USER_ENTERED') # USER_ENTERED biar kebaca date
 
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
@@ -92,7 +110,6 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari):
         elif weekday == 6: is_libur = True; keterangan = "LIBUR MINGGU"
         elif weekday == 5: is_libur = False; keterangan = "SABTU"
         else: is_libur = False; keterangan = "HARI KERJA"
-
     jam_kerja_float = 0.0; lembur_jam = 0.0; lembur_multiplier = "0.00"
     if is_libur:
         total_jam_bersih = total_jam_mentah - 1;
@@ -134,43 +151,34 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-# FIX UTAMA: AUTO ALPA + AUTO LIBUR
 def auto_absen_23_59():
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
     dict_libur = get_libur_nasional(hari_ini.year)
-
-    for i in range(14): # cek 14 hari kebelakang
+    for i in range(14):
         tgl_cek = hari_ini - timedelta(days=i)
         tgl_str = tgl_cek.strftime('%d/%m/%Y')
         tgl_api = tgl_cek.strftime('%Y-%m-%d')
         jam_23_59 = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
-
         nama_libur = dict_libur.get(tgl_api, "")
         is_minggu = tgl_cek.weekday() == 6
         is_tgl_merah = tgl_api in dict_libur
         is_hari_kerja = not is_minggu and not is_tgl_merah
-
         for id_kar in karyawan_ids:
             sudah_absen = False
             for row in all_data[1:]:
                 if str(row[0]).strip().zfill(8) == id_kar and row[1]:
                     tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
                     if tgl_db == tgl_str: sudah_absen = True; break
-
             if not sudah_absen:
-                if is_tgl_merah:
-                    keterangan = f"LIBUR NASIONAL: {nama_libur}"
-                elif is_minggu:
-                    keterangan = "LIBUR MINGGU OTOMATIS"
-                elif is_hari_kerja: # SENIN - SABTU BUKAN LIBUR
-                    keterangan = "ALPA"
-                else:
-                    continue # skip
-
+                if is_tgl_merah: keterangan = f"LIBUR NASIONAL: {nama_libur}"
+                elif is_minggu: keterangan = "LIBUR MINGGU OTOMATIS"
+                elif is_hari_kerja: keterangan = "ALPA"
+                else: continue
                 row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", "ALPA" if is_hari_kerja else "LIBUR", keterangan]
-                ws_absen.insert_row(row_baru, 2, value_input_option='RAW')
+                # GANTI JADI USER_ENTERED BIAR JADI DATE
+                ws_absen.insert_row(row_baru, 2, value_input_option='USER_ENTERED')
     sort_by_tanggal(); st.cache_data.clear()
 
 auto_absen_23_59()
@@ -252,7 +260,8 @@ with menu[0]:
                 else:
                     datetime_str = waktu_absen.strftime('%d/%m/%Y %H:%M:%S')
                     row = [id_karyawan, datetime_str, "", nama, "", "0.00", "", ""]
-                    ws_absen.insert_row(row, 2, value_input_option='RAW'); sort_by_tanggal()
+                    # GANTI JADI USER_ENTERED
+                    ws_absen.insert_row(row, 2, value_input_option='USER_ENTERED'); sort_by_tanggal()
                     st.success(f"✅ Absen Masuk: {datetime_str}"); st.cache_data.clear()
             else: st.warning("Isi ID yang benar dulu min")
 
