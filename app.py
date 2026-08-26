@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V1.6")
+st.title("📍 APK ABSENSI KARYAWAN V2.0")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -46,58 +46,67 @@ def get_libur(tahun):
         return {i['holiday_date']: i['holiday_name'] for i in res.json()}
     except: return {}
 
-def hitung(masuk_str, pulang_str, status, libur_dict):
-    if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
-    masuk = datetime.strptime(masuk_str, '%d/%m/%Y %H:%M:%S')
-    pulang = datetime.strptime(pulang_str, '%d/%m/%Y %H:%M:%S')
-    total_jam_mentah = (pulang - masuk).total_seconds() / 3600
+def get_shift_info(masuk_dt):
+    jam = masuk_dt.hour
+    if 7 <= jam < 15: # SHIFT 1: 07-15
+        return "SHIFT 1", masuk_dt.replace(hour=15, minute=0, second=0)
+    elif 15 <= jam < 23: # SHIFT 2: 15-23
+        return "SHIFT 2", masuk_dt.replace(hour=23, minute=0, second=0)
+    else: # SHIFT 3: 23-07
+        efektif_pulang = masuk_dt.replace(hour=7, minute=0, second=0)
+        if jam >= 23: efektif_pulang += timedelta(days=1)
+        return "SHIFT 3", efektif_pulang
 
-    # ATURAN: 8 JAM KERJA - 1 JAM ISTIRAHAT = 7 JAM EFEKTIF
+def hitung_lembur_normal(lembur_jam):
+    if lembur_jam <= 0: return 0.0
+    jam_pertama = min(1.0, lembur_jam)
+    sisa = lembur_jam - jam_pertama
+    return (jam_pertama * 1.5) + (sisa * 2.0)
+
+def hitung(masuk_dt, pulang_dt, status, libur_dict):
+    if not masuk_dt or not pulang_dt: return "0:00:00", "0.00", "", ""
+
+    total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
     potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
     jam_kerja_float = total_jam_mentah - potong_istirahat
     if jam_kerja_float < 0: jam_kerja_float = 0
 
-    tgl = masuk.strftime('%Y-%m-%d')
-    weekday = masuk.weekday()
-    is_libur = status in ["LIBUR", "TUKAR HARI"] or tgl in libur_dict or weekday == 6
+    tgl = masuk_dt.strftime('%Y-%m-%d')
+    weekday = masuk_dt.weekday()
+    is_tgl_merah = tgl in libur_dict
+    is_minggu = weekday == 6
+    is_sabtu = weekday == 5
+    is_libur = status in ["LIBUR", "TUKAR HARI"] or is_tgl_merah or is_minggu
 
     keterangan = "HARI KERJA"
     if status == "TUKAR HARI": keterangan = "TUKAR HARI"
     elif status == "LIBUR": keterangan = "LIBUR"
-    elif tgl in libur_dict: keterangan = f"LIBUR NASIONAL: {libur_dict[tgl]}"
-    elif weekday == 6: keterangan = "LIBUR MINGGU"
-    elif weekday == 5: keterangan = "SABTU"
+    elif is_tgl_merah: keterangan = f"LIBUR NASIONAL: {libur_dict[tgl]}"
+    elif is_minggu: keterangan = "LIBUR MINGGU"
+    elif is_sabtu: keterangan = "SABTU"
 
-    # HITUNG LEMBUR - INI YG DIBENERIN
+    shift, jam_efektif_pulang = get_shift_info(masuk_dt)
     lembur_x = 0.0
-    if is_libur: # MINGGU/LIBUR NASIONAL
-        lembur_x = jam_kerja_float * 2.0
-        jam_kerja_float = 0 # semua masuk lembur
-    elif weekday == 5: # SABTU
-        jam_efektif_sabtu = 5.0
-        if jam_kerja_float > jam_efektif_sabtu:
-            lembur_jam = jam_kerja_float - jam_efektif_sabtu
-            jam_pertama = min(1.0, lembur_jam)
-            sisa = lembur_jam - jam_pertama
-            lembur_x = (jam_pertama * 1.5) + (sisa * 2.0)
-            jam_kerja_float = jam_efektif_sabtu
-    else: # HARI KERJA SENIN-JUMAT
-        jam_efektif_normal = 7.0
-        if jam_kerja_float > jam_efektif_normal: # baru lembur kalau > 7 jam
-            lembur_jam = jam_kerja_float - jam_efektif_normal
-            jam_pertama = min(1.0, lembur_jam)
-            sisa = lembur_jam - jam_pertama
-            lembur_x = (jam_pertama * 1.5) + (sisa * 2.0)
-            jam_kerja_float = jam_efektif_normal
 
-    # SHIFT
-    jam_masuk = masuk.hour
-    jam_pulang = pulang.hour
-    total_jam_efektif = jam_kerja_float + potong_istirahat
-    if 7 <= jam_masuk < 8 and total_jam_efektif >= 10: shift = "LONG SHIFT1"
-    elif 19 <= jam_masuk < 20 and total_jam_efektif >= 10: shift = "LONG SHIFT2"
-    elif 900 <= jam_pulang*60 < 1380: shift = "SHIFT 1"
-    else: shift = "SHIFT 2"
+    # ATURAN UTAMA LEMBUR
+    if is_libur: # MINGGU / TGL MERAH
+        lembur_x = jam_kerja_float * 2.0 # LANGSUNG X2 SEMUA
+        jam_kerja_float = 0
+    elif is_sabtu: # SABTU
+        jam_kerja_float = min(jam_kerja_float, 5.0)
+        if total_jam_mentah > 6: # 5 kerja + 1 istirahat
+            lembur_jam = total_jam_mentah - 6
+            lembur_x = lembur_jam * 1.5 # SABTU X1.5 SEMUA
+    else: # SENIN-JUMAT
+        batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
+        if pulang_dt > batas_lembur:
+            lembur_jam = (pulang_dt - batas_lembur).total_seconds() / 3600
+            lembur_x = hitung_lembur_normal(lembur_jam) # JAM 1 X1.5, DST X2
+        jam_kerja_float = min(jam_kerja_float, 7.0) # di cap 7 jam
+
+    # CEK LONG SHIFT
+    if total_jam_mentah >= 10:
+        shift = shift.replace("SHIFT", "LONG SHIFT")
 
     return f"{int(jam_kerja_float)}:00:00", f"{lembur_x:.2f}", shift, keterangan
 
@@ -105,7 +114,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama):
     id_kar = id_kar.zfill(8)
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
     libur_dict = get_libur(masuk_dt.year)
-    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), "NORMAL", libur_dict)
+    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, "NORMAL", libur_dict)
     row_data = [id_kar, nama, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), jam_kerja, jam_lembur, shift, ket]
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (pd.to_datetime(absen_df['JAM MASUK'], errors='coerce').dt.strftime('%d/%m/%Y') == tgl_str)]
     if not existing.empty:
