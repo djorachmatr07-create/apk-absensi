@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V4.9")
+st.title("📍 APK ABSENSI KARYAWAN V5.0")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -26,12 +26,9 @@ def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
     absen = pd.DataFrame(ws_absen.get_all_records())
-
-    # FIX 1: KALAU KOLOM STATUS BELUM ADA, BIKIN OTOMATIS
     if 'STATUS' not in absen.columns:
         absen['STATUS'] = 'H'
-        ws_absen.update('I1', [['STATUS']]) # Tambah header STATUS di kolom I
-
+        ws_absen.update('I1', [['STATUS']])
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
@@ -42,44 +39,72 @@ def load_data():
 db_df, absen_df = load_data()
 st.success(f"✅ Konek. Karyawan: {len(db_df)} | Data Absen: {len(absen_df)}")
 
-# HARDCODE LIBUR 2026
+# HARDCODE LIBUR + CUTI BERSAMA 2026 LENGKAP
 LIBUR_NASIONAL = {
-    "2026-01-01": "Tahun Baru 2026", "2026-01-29": "Tahun Baru Imlek 2577 Kongzili",
-    "2026-02-14": "Isra Mikraj Nabi Muhammad SAW", "2026-03-19": "Hari Suci Nyepi Tahun Baru Saka 1948",
-    "2026-03-29": "Wafat Isa Al Masih", "2026-04-21": "Hari Raya Idul Fitri 1447 H",
-    "2026-04-22": "Hari Raya Idul Fitri 1447 H", "2026-05-01": "Hari Buruh Internasional",
-    "2026-05-14": "Kenaikan Isa Al Masih", "2026-05-27": "Hari Raya Waisak 2560 BE",
-    "2026-06-01": "Hari Lahir Pancasila", "2026-06-17": "Hari Raya Idul Adha 1447 H",
-    "2026-06-27": "1 Muharram 1448 H - Tahun Baru Islam", "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
-    "2026-08-28": "Maulid Nabi Muhammad SAW", "2026-12-25": "Hari Raya Natal",
+    "2026-01-01": "Tahun Baru 2026",
+    "2026-01-29": "Tahun Baru Imlek 2577 Kongzili",
+    "2026-02-14": "Isra Mikraj Nabi Muhammad SAW",
+    "2026-03-19": "Hari Suci Nyepi Tahun Baru Saka 1948",
+    "2026-03-20": "Cuti Bersama Hari Suci Nyepi", # INI YG KEMARIN KELEWAT
+    "2026-03-29": "Wafat Isa Al Masih",
+    "2026-03-30": "Cuti Bersama Wafat Isa Al Masih",
+    "2026-04-21": "Hari Raya Idul Fitri 1447 H",
+    "2026-04-22": "Hari Raya Idul Fitri 1447 H",
+    "2026-04-23": "Cuti Bersama Idul Fitri 1447 H",
+    "2026-04-24": "Cuti Bersama Idul Fitri 1447 H",
+    "2026-05-01": "Hari Buruh Internasional",
+    "2026-05-14": "Kenaikan Isa Al Masih",
+    "2026-05-27": "Hari Raya Waisak 2560 BE",
+    "2026-05-28": "Cuti Bersama Hari Raya Waisak",
+    "2026-06-01": "Hari Lahir Pancasila",
+    "2026-06-17": "Hari Raya Idul Adha 1447 H",
+    "2026-06-18": "Cuti Bersama Hari Raya Idul Adha",
+    "2026-06-27": "1 Muharram 1448 H - Tahun Baru Islam",
+    "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
+    "2026-08-28": "Maulid Nabi Muhammad SAW",
+    "2026-12-25": "Hari Raya Natal",
 }
-st.info(f"✅ Data Kalender Nasional Loaded: {len(LIBUR_NASIONAL)} hari libur")
+st.info(f"✅ Data Kalender Nasional Loaded: {len(LIBUR_NASIONAL)} hari libur/cuti")
 
-def cek_keterangan_dari_tanggal(tanggal_dt):
+def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
-    if tgl_str in LIBUR_NASIONAL:
-        return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
-    elif weekday == 6:
-        return "LIBUR MINGGU"
-    elif weekday == 5:
-        return "SABTU"
-    else:
-        return "HARI KERJA"
+
+    # RULE 1: KALAU ADA JAM MASUK DAN PULANG = MASUK
+    if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str:
+        return "MASUK"
+
+    # RULE 2: KALAU JAM KERJA 0 BARU CEK KALENDER
+    if jam_kerja_float == 0:
+        if tgl_str in LIBUR_NASIONAL:
+            return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
+        elif weekday == 6:
+            return "LIBUR MINGGU"
+        elif weekday == 5:
+            return "SABTU"
+        else:
+            return "TIDAK MASUK" # Alpa/Izin/Sakit nanti diedit manual
+
+    return "HARI KERJA"
 
 def hitung(masuk_dt, pulang_dt, status):
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
     jam_kerja_float = total_jam_mentah - (1.0 if total_jam_mentah >= 8 else 0.0)
     if jam_kerja_float < 0: jam_kerja_float = 0
 
-    if jam_kerja_float == 0:
-        keterangan = cek_keterangan_dari_tanggal(masuk_dt)
-        shift = status if status in ['A','I','S','C','L'] else 'L' if 'LIBUR' in keterangan else 'H'
+    jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
+    jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
+
+    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float)
+
+    if keterangan == "MASUK":
+        shift = "SHIFT 2" if 15 <= masuk_dt.hour < 23 else "SHIFT 1"
+    elif jam_kerja_float == 0:
+        shift = status if status in ['A','I','S','C','L'] else 'L'
     else:
-        keterangan = "HARI KERJA"
         shift = "SHIFT 2" if 15 <= masuk_dt.hour < 23 else "SHIFT 1"
 
-    return f"{int(jam_kerja_float)}:00:00", "0.00", shift, keterangan, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
+    return f"{int(jam_kerja_float)}:00:00", "0.00", shift, keterangan, jam_masuk_str, jam_pulang_str
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
     id_kar = id_kar.zfill(8)
@@ -99,17 +124,17 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-def update_semua_jam_0():
+def update_semua_keterangan():
+    """Update semua data berdasarkan jam masuk dan kalender"""
     if absen_df.empty: return 0
-    data_jam0 = absen_df[absen_df['JAM KERJA'] == '0:00:00'].copy()
-    if data_jam0.empty: return 0
-
     updates = []
-    for i, row in data_jam0.iterrows():
+    for i, row in absen_df.iterrows():
         masuk_dt = pd.to_datetime(row['JAM MASUK'])
-        ket_baru = cek_keterangan_dari_tanggal(masuk_dt)
+        jam_kerja = row['JAM KERJA']
+        jam_kerja_float = 0 if jam_kerja == '0:00:00' else 7 # asal bukan 0
 
-        # FIX 2: PAKE.get BIAR GAK KEYERROR
+        ket_baru = cek_keterangan_dari_tanggal(masuk_dt, row['JAM MASUK'], row['JAM PULANG'], jam_kerja_float)
+
         status_lama = row.get('STATUS', 'H')
         shift_baru = status_lama if status_lama in ['A','I','S','C','L'] else 'L' if 'LIBUR' in ket_baru else 'H'
 
@@ -170,10 +195,10 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {kode_pilih}")
 
 with menu[2]:
-    if st.button("🔄 UPDATE SEMUA JAM KERJA 0 DARI KALENDER", use_container_width=True, type="primary"):
-        with st.spinner("Sedang cek semua data yg jam kerja 0..."):
-            jml = update_semua_jam_0()
-        st.success(f"✅ Selesai! {jml} data diupdate keterangannya")
+    if st.button("🔄 UPDATE SEMUA KETERANGAN DARI KALENDER", use_container_width=True, type="primary"):
+        with st.spinner("Sedang update semua data..."):
+            jml = update_semua_keterangan()
+        st.success(f"✅ Selesai! {jml} data diupdate")
         st.rerun()
     if st.button("🗑️ REFRESH DATA", use_container_width=True):
         load_data.clear()
