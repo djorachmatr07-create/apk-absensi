@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V7.9 - 1 HARI 1 ABSEN")
+st.title("📍 APK V8.0")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -48,7 +48,7 @@ def load_data():
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-        absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y') # TAMBAH KOLOM TGL
+        absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
     else:
         absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN", "STATUS", "JAM MASUK DT", "TGL"])
     return db, absen
@@ -120,19 +120,13 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
     jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status)
     row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
-
-    # CEK DULU APAKAH SUDAH ADA
     if not absen_df.empty:
         existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_str)]
     else: existing = pd.DataFrame()
-
-    if not existing.empty: # KALAU SUDAH ADA, UPDATE
+    if not existing.empty:
         row_num = existing.index[0] + 2
         ws_absen.update(f'A{row_num}:I{row_num}', [row_data])
-        return "UPDATE"
-    else: # KALAU BELUM ADA, INSERT BARU
-        ws_absen.insert_row(row_data, 2)
-        return "INSERT"
+    else: ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
 def update_semua_keterangan():
@@ -151,30 +145,23 @@ def update_semua_keterangan():
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
+# MENU ABSEN 2 STEP
 with menu[0]:
     id_in = st.text_input("Masukkan ID Karyawan").strip().zfill(8)
     nama = ""
-    sudah_absen = False
-    data_lama = None
-
     if id_in:
         if id_in in db_df['ID KARYAWAN'].values:
             nama = db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
-            st.info(f"Nama: {nama}")
+            st.success(f"✅ Nama: {nama}")
         else:
             st.error(f"ID {id_in} tidak ada")
 
-    tgl_masuk = st.date_input("Tgl Masuk", datetime.now())
-    tgl_str = tgl_masuk.strftime('%d/%m/%Y')
+    tgl = st.date_input("Tanggal", datetime.now())
+    tgl_str = tgl.strftime('%d/%m/%Y')
 
-    # CEK APAKAH ID + TGL INI SUDAH ABSEN
+    data_hari_ini = pd.DataFrame()
     if id_in and not absen_df.empty:
-        cek = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TGL'] == tgl_str)]
-        if not cek.empty:
-            sudah_absen = True
-            data_lama = cek.iloc[0]
-            st.warning(f"⚠️ ID ini sudah absen tanggal {tgl_str}. Data lama akan di TIMPA jika disimpan lagi.")
-            st.write(f"Data Lama: {data_lama['JAM MASUK']} - {data_lama['JAM PULANG']} | Status: {data_lama['STATUS']}")
+        data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TGL'] == tgl_str)]
 
     DAFTAR_STATUS_ABSEN = {
         "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU",
@@ -183,22 +170,37 @@ with menu[0]:
     }
     status_pilih = st.selectbox("Pilih Status", options=list(DAFTAR_STATUS_ABSEN.keys()), format_func=lambda x: DAFTAR_STATUS_ABSEN[x])
 
-    col1, col2 = st.columns(2)
-    with col1: jam_masuk = st.time_input("Jam Masuk", datetime.now().time())
-    with col2: tgl_pulang = st.date_input("Tgl Pulang", datetime.now())
-    jam_pulang = st.time_input("Jam Pulang", datetime.now().time())
+    # STEP 1: KALAU BELUM ABSEN MASUK
+    if data_hari_ini.empty:
+        st.info("📌 Silahkan Absen Masuk Dulu")
+        jam_masuk = st.time_input("Jam Masuk", datetime.now().time())
 
-    btn_text = "UPDATE ABSEN" if sudah_absen else "SIMPAN ABSEN"
-    if st.button(btn_text, use_container_width=True, type="primary", disabled=not nama):
-        if nama:
-            masuk_dt = datetime.combine(tgl_masuk, jam_masuk)
-            pulang_dt = datetime.combine(tgl_pulang, jam_pulang)
-            hasil = upsert_absen(id_in, masuk_dt, pulang_dt, nama, status_pilih)
-            if hasil == "UPDATE":
-                st.success(f"✅ Data berhasil di UPDATE. Status: {DAFTAR_STATUS_ABSEN[status_pilih]}")
-            else:
-                st.success(f"✅ Data berhasil di SIMPAN. Status: {DAFTAR_STATUS_ABSEN[status_pilih]}")
+        if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama):
+            masuk_dt = datetime.combine(tgl, jam_masuk)
+            pulang_dt = masuk_dt # Sementara sama dengan jam masuk
+            upsert_absen(id_in, masuk_dt, pulang_dt, nama, status_pilih)
+            st.balloons() # ILUSTRASI BERHASIL
+            st.success(f"✅ ABSEN MASUK BERHASIL!\nJam: {masuk_dt.strftime('%H:%M')}")
             st.rerun()
+
+    # STEP 2: KALAU SUDAH ABSEN MASUK, TAMPILKAN ABSEN PULANG
+    else:
+        data = data_hari_ini.iloc[0]
+        st.success(f"📌 Sudah Absen Masuk: {pd.to_datetime(data['JAM MASUK']).strftime('%H:%M')}")
+
+        if data['JAM MASUK'] == data['JAM PULANG']:
+            st.warning("Silahkan Absen Pulang")
+            jam_pulang = st.time_input("Jam Pulang", datetime.now().time())
+            if st.button("🔴 ABSEN PULANG", use_container_width=True, type="primary"):
+                masuk_dt = pd.to_datetime(data['JAM MASUK'])
+                pulang_dt = datetime.combine(tgl, jam_pulang)
+                upsert_absen(id_in, masuk_dt, pulang_dt, nama, data['STATUS'])
+                st.balloons() # ILUSTRASI BERHASIL
+                st.success(f"✅ ABSEN PULANG BERHASIL!\nJam: {pulang_dt.strftime('%H:%M')}")
+                st.rerun()
+        else:
+            st.info(f"✅ Sudah Absen Lengkap\nMasuk: {pd.to_datetime(data['JAM MASUK']).strftime('%H:%M')} | Pulang: {pd.to_datetime(data['JAM PULANG']).strftime('%H:%M')}")
+            st.warning("Tidak bisa absen lagi hari ini")
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
@@ -229,7 +231,6 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("Tombol ini untuk update semua data lama agar ikut aturan baru")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True):
         with st.spinner("Mohon tunggu..."):
             jml = update_semua_keterangan()
