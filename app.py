@@ -94,16 +94,10 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     tanggal_api_format = masuk.strftime('%Y-%m-%d'); weekday = masuk.weekday()
     nama_libur = dict_libur.get(tanggal_api_format, "")
 
-    if is_edit:
-        potong_istirahat_edit = 1.0 if total_jam_mentah >= 8 else 0.0
-        jam_kerja_bersih = total_jam_mentah - potong_istirahat_edit
-        if jam_kerja_bersih < 0: jam_kerja_bersih = 0
-        if status_hari == "TUKAR HARI": return "0:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), "TUKAR HARI"
-        if status_hari == "LIBUR": return "0:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), "LIBUR"
-        if status_hari == "LEMBUR MINGGU":
-            jam_kerja = f"{int(jam_kerja_bersih)}:00:00"
-            lembur_multiplier = hitung_lembur_multiplier(jam_kerja_bersih, 2.0)
-            return jam_kerja, lembur_multiplier, tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
+    # ATURAN BARU: JAM KERJA TETEP DIHITUNG AKTUAL
+    potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
+    jam_kerja_float = total_jam_mentah - potong_istirahat
+    if jam_kerja_float < 0: jam_kerja_float = 0
 
     is_libur = False; keterangan = ""
     if status_hari == "LIBUR": is_libur = True; keterangan = "LIBUR"
@@ -118,30 +112,32 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
         else:
             is_libur = False; keterangan = "HARI KERJA"
 
-    jam_kerja_float = 0.0; lembur_jam = 0.0; lembur_multiplier = "0.00"
-    potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
+    lembur_jam = 0.0; lembur_multiplier = "0.00"
 
-    if is_libur:
-        total_jam_bersih = total_jam_mentah - potong_istirahat
-        if total_jam_bersih < 0: total_jam_bersih = 0
-        jam_kerja_float = 0.0; lembur_jam = total_jam_bersih
+    if is_edit:
+        if status_hari == "TUKAR HARI": return f"{int(jam_kerja_float)}:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), "TUKAR HARI"
+        if status_hari == "LIBUR": return f"{int(jam_kerja_float)}:00:00", "0.00", tentukan_shift(masuk_bulat, pulang_bulat), "LIBUR"
+        if status_hari == "LEMBUR MINGGU":
+            lembur_jam = jam_kerja_float
+            lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
+            return f"{int(jam_kerja_float)}:00:00", lembur_multiplier, tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
+
+    if is_libur: # KALAU LIBUR, SEMUA MASUK LEMBUR X2
+        lembur_jam = jam_kerja_float
         lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
-    elif weekday == 5 and status_hari == "NORMAL":
-        total_jam_bersih = total_jam_mentah
-        if total_jam_bersih >= 8.0: total_jam_bersih -= 1.0; keterangan = "SABTU FULL DAY"
+    elif weekday == 5 and status_hari == "NORMAL": # SABTU
+        if total_jam_mentah >= 8.0: keterangan = "SABTU FULL DAY"
         jam_efektif = 5.0
-        lembur_jam = total_jam_bersih - jam_efektif
+        lembur_jam = jam_kerja_float - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
-        jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
+        jam_kerja_float = jam_efektif if jam_kerja_float >= jam_efektif else jam_kerja_float
         if lembur_jam > 0:
             jam_pertama = 1.0 if lembur_jam >= 1 else lembur_jam; sisa = lembur_jam - jam_pertama
             lembur_efektif = (jam_pertama * 1.5) + (sisa * 2.0); lembur_multiplier = f"{lembur_efektif:.2f}"
-    else:
-        total_jam_bersih = total_jam_mentah - potong_istirahat
-        if total_jam_bersih < 0: total_jam_bersih = 0
-        jam_efektif = 7.0; lembur_jam = total_jam_bersih - jam_efektif
+    else: # HARI KERJA BIASA
+        jam_efektif = 7.0; lembur_jam = jam_kerja_float - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
-        jam_kerja_float = jam_efektif if total_jam_bersih >= jam_efektif else total_jam_bersih
+        jam_kerja_float = jam_efektif if jam_kerja_float >= jam_efektif else jam_kerja_float
         if lembur_jam > 0:
             jam_pertama = 1.0 if lembur_jam >= 1 else lembur_jam; sisa = lembur_jam - jam_pertama
             lembur_efektif = (jam_pertama * 1.5) + (sisa * 2.0); lembur_multiplier = f"{lembur_efektif:.2f}"
@@ -163,7 +159,7 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX ANTI DOUBLE: KALAU UDAH ADA ABSEN, SKIP 23:59
+def auto_absen_23_59(): # FIX ANTI DOUBLE
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
@@ -174,7 +170,7 @@ def auto_absen_23_59(): # FIX ANTI DOUBLE: KALAU UDAH ADA ABSEN, SKIP 23:59
             key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
             data_exist.add(key)
 
-    for i in range(1, 15): # MULAI DARI KEMARIN
+    for i in range(1, 15):
         tgl_cek = hari_ini - timedelta(days=i)
         tgl_str = tgl_cek.strftime('%d/%m/%Y')
         tgl_api = tgl_cek.strftime('%Y-%m-%d')
@@ -185,7 +181,6 @@ def auto_absen_23_59(): # FIX ANTI DOUBLE: KALAU UDAH ADA ABSEN, SKIP 23:59
         is_hari_kerja = not is_minggu and not is_tgl_merah
 
         for id_kar in karyawan_ids:
-            # CEK APAKAH HARI INI UDAH ADA ABSEN BENERAN SELAIN 23:59
             sudah_absen_hari_ini = False
             for row in all_data[1:]:
                 if str(row[0]).strip().zfill(8) == id_kar and row[1]:
@@ -193,9 +188,7 @@ def auto_absen_23_59(): # FIX ANTI DOUBLE: KALAU UDAH ADA ABSEN, SKIP 23:59
                     if tgl_db == tgl_str and "23:59:00" not in row[1]:
                         sudah_absen_hari_ini = True
                         break
-
-            if sudah_absen_hari_ini: # KALAU UDAH ADA, SKIP
-                continue
+            if sudah_absen_hari_ini: continue
 
             key_cek = f"{id_kar}_{jam_23_59}"
             if key_cek in data_exist: continue
