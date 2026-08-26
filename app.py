@@ -50,9 +50,13 @@ def load_db():
 
 db_dict = load_db()
 
-@st.cache_data(ttl=60) # KASIH CACHE 1 MENIT BIAR GA SPAM API
+@st.cache_data(ttl=120) # NAEKIN JADI 2 MENIT
 def load_absen_data():
-    return ws_absen.get_all_values()
+    try:
+        return ws_absen.get_all_values()
+    except:
+        st.warning("Gagal load data. Coba refresh")
+        return [headers]
 
 headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"]
 if ws_absen.row_values(1)!= headers:
@@ -60,18 +64,22 @@ if ws_absen.row_values(1)!= headers:
 
 def sort_by_tanggal():
     all_data = load_absen_data()
+    if len(all_data) < 2: return
     header = all_data[0]
     data = [row for row in all_data[1:] if row[0]!= '']
     try:
         data.sort(key=lambda x: datetime.strptime(x[1], '%d/%m/%Y %H:%M:%S'), reverse=True)
     except:
         pass
-    ws_absen.clear()
-    time.sleep(0.5)
-    ws_absen.update('A1', [header])
-    if data:
-        ws_absen.update('A2', data, value_input_option='USER_ENTERED')
-    st.cache_data.clear() # HAPUS CACHE BIAR REFRESH
+    try:
+        ws_absen.clear()
+        time.sleep(1)
+        ws_absen.update('A1', [header])
+        if data:
+            ws_absen.update('A2', data, value_input_option='USER_ENTERED')
+    except:
+        pass
+    st.cache_data.clear()
 
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
@@ -164,59 +172,61 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59():
-    all_data = load_absen_data() # PAKE CACHE
-    karyawan_ids = list(db_dict.keys())
-    hari_ini = datetime.now()
-    dict_libur = get_libur_nasional(hari_ini.year)
-    data_exist = set()
-    for row in all_data[1:]:
-        if row[0] and row[1]:
-            key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
-            data_exist.add(key)
+def auto_absen_23_59(): # FIX: PAKE BATCH + TRY EXCEPT
+    try:
+        all_data = load_absen_data()
+        karyawan_ids = list(db_dict.keys())
+        hari_ini = datetime.now()
+        dict_libur = get_libur_nasional(hari_ini.year)
+        data_exist = set()
+        for row in all_data[1:]:
+            if row[0] and row[1]:
+                key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
+                data_exist.add(key)
 
-    batch_rows = []
-    for i in range(1, 15):
-        tgl_cek = hari_ini - timedelta(days=i)
-        tgl_str = tgl_cek.strftime('%d/%m/%Y')
-        tgl_api = tgl_cek.strftime('%Y-%m-%d')
-        jam_23_59 = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
-        nama_libur = dict_libur.get(tgl_api, "")
-        is_minggu = tgl_cek.weekday() == 6
-        is_tgl_merah = tgl_api in dict_libur
-        is_hari_kerja = not is_minggu and not is_tgl_merah
+        batch_rows = []
+        for i in range(1, 15):
+            tgl_cek = hari_ini - timedelta(days=i)
+            tgl_str = tgl_cek.strftime('%d/%m/%Y')
+            tgl_api = tgl_cek.strftime('%Y-%m-%d')
+            jam_23_59 = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
+            nama_libur = dict_libur.get(tgl_api, "")
+            is_minggu = tgl_cek.weekday() == 6
+            is_tgl_merah = tgl_api in dict_libur
+            is_hari_kerja = not is_minggu and not is_tgl_merah
 
-        for id_kar in karyawan_ids:
-            sudah_absen_hari_ini = False
-            for row in all_data[1:]:
-                if str(row[0]).strip().zfill(8) == id_kar and row[1]:
-                    tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
-                    if tgl_db == tgl_str and "23:59:00" not in row[1]:
-                        sudah_absen_hari_ini = True
-                        break
-            if sudah_absen_hari_ini: continue
+            for id_kar in karyawan_ids:
+                sudah_absen_hari_ini = False
+                for row in all_data[1:]:
+                    if str(row[0]).strip().zfill(8) == id_kar and row[1]:
+                        tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+                        if tgl_db == tgl_str and "23:59:00" not in row[1]:
+                            sudah_absen_hari_ini = True
+                            break
+                if sudah_absen_hari_ini: continue
 
-            key_cek = f"{id_kar}_{jam_23_59}"
-            if key_cek in data_exist: continue
+                key_cek = f"{id_kar}_{jam_23_59}"
+                if key_cek in data_exist: continue
 
-            if is_tgl_merah:
-                keterangan = f"LIBUR NASIONAL: {nama_libur}"
-                shift = "LIBUR"
-            elif is_minggu:
-                keterangan = "LIBUR MINGGU OTOMATIS"
-                shift = "LIBUR"
-            elif is_hari_kerja:
-                keterangan = "ALPA"
-                shift = "ALPA"
-            else: continue
-            batch_rows.append([id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan])
+                if is_tgl_merah:
+                    keterangan = f"LIBUR NASIONAL: {nama_libur}"
+                    shift = "LIBUR"
+                elif is_minggu:
+                    keterangan = "LIBUR MINGGU OTOMATIS"
+                    shift = "LIBUR"
+                elif is_hari_kerja:
+                    keterangan = "ALPA"
+                    shift = "ALPA"
+                else: continue
+                batch_rows.append([id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan])
 
-    if batch_rows:
-        for row in batch_rows:
-            ws_absen.insert_row(row, 2, value_input_option='USER_ENTERED')
-            time.sleep(0.1) # JEDA BIAR GA KENA LIMIT
+        if batch_rows: # INSERT SEKALIGUS 1X JALAN
+            ws_absen.insert_rows(batch_rows, 2, value_input_option='USER_ENTERED')
+            time.sleep(2) # KASIH JEDA 2 DETIK
 
-    sort_by_tanggal()
+        sort_by_tanggal()
+    except Exception as e:
+        st.warning(f"Auto absen skip dulu karena: {e}")
 
 auto_absen_23_59()
 
@@ -236,7 +246,7 @@ with menu[1]:
         st.markdown("---")
         id_edit = st.text_input("Masukkan ID Karyawan yg mau diedit", key="id_edit").strip().zfill(8)
         if id_edit:
-            all_data = load_absen_data() # PAKE CACHE
+            all_data = load_absen_data()
             data_karyawan = [row for row in all_data[1:] if str(row[0]).strip().zfill(8) == id_edit]
             if data_karyawan:
                 opsi_data = [f"{row[1]} s/d {row[2]} - {row[7]}" for row in data_karyawan[:10]]
@@ -287,7 +297,7 @@ with menu[0]:
     dict_libur = get_libur_nasional(waktu_absen.year)
 
     col1, col2, col3, col4 = st.columns(4)
-    all_data = load_absen_data() # PAKE CACHE
+    all_data = load_absen_data()
     tanggal_hari_ini = waktu_absen.strftime('%d/%m/%Y')
 
     with col1:
@@ -336,7 +346,7 @@ with menu[0]:
                         cell_list.append(gspread.Cell(row_index, 8, ket))
                         hitung += 1
                 if cell_list:
-                    ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED') # BATCH UPDATE
+                    ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED')
                     sort_by_tanggal()
                     st.success(f"✅ {hitung} data berhasil dihitung ulang sesuai kalender")
                     st.cache_data.clear()
