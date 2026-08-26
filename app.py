@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V1.2")
+st.title("📍 APK ABSENSI KARYAWAN V1.6")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -20,7 +20,7 @@ def connect_gsheet():
     ws_db = sh.worksheet("DATABASE KARYAWAN")
     ws_db.format('A:A', {'numberFormat': {'type': 'TEXT'}})
     ws_absen.format('A:A', {'numberFormat': {'type': 'TEXT'}})
-    ws_absen.format('C:D', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}}) # C D untuk jam
+    ws_absen.format('C:D', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}})
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
@@ -29,11 +29,10 @@ ws_absen, ws_db = connect_gsheet()
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
-
     absen = pd.DataFrame(ws_absen.get_all_records())
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
-    else: # URUTAN BARU SESUAI SHEET KAMU
+    else:
         absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"])
     return db, absen
 
@@ -51,9 +50,12 @@ def hitung(masuk_str, pulang_str, status, libur_dict):
     if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
     masuk = datetime.strptime(masuk_str, '%d/%m/%Y %H:%M:%S')
     pulang = datetime.strptime(pulang_str, '%d/%m/%Y %H:%M:%S')
-    total_jam = (pulang - masuk).total_seconds() / 3600
-    potong = 1.0 if total_jam >= 8 else 0
-    jam_kerja = max(0, total_jam - potong)
+    total_jam_mentah = (pulang - masuk).total_seconds() / 3600
+
+    # ATURAN: 8 JAM KERJA - 1 JAM ISTIRAHAT = 7 JAM EFEKTIF
+    potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
+    jam_kerja_float = total_jam_mentah - potong_istirahat
+    if jam_kerja_float < 0: jam_kerja_float = 0
 
     tgl = masuk.strftime('%Y-%m-%d')
     weekday = masuk.weekday()
@@ -66,40 +68,51 @@ def hitung(masuk_str, pulang_str, status, libur_dict):
     elif weekday == 6: keterangan = "LIBUR MINGGU"
     elif weekday == 5: keterangan = "SABTU"
 
-    lembur = 0
-    if is_libur: lembur = jam_kerja
-    elif weekday == 5: lembur = max(0, jam_kerja - 5)
-    else: lembur = max(0, jam_kerja - 7)
+    # HITUNG LEMBUR - INI YG DIBENERIN
+    lembur_x = 0.0
+    if is_libur: # MINGGU/LIBUR NASIONAL
+        lembur_x = jam_kerja_float * 2.0
+        jam_kerja_float = 0 # semua masuk lembur
+    elif weekday == 5: # SABTU
+        jam_efektif_sabtu = 5.0
+        if jam_kerja_float > jam_efektif_sabtu:
+            lembur_jam = jam_kerja_float - jam_efektif_sabtu
+            jam_pertama = min(1.0, lembur_jam)
+            sisa = lembur_jam - jam_pertama
+            lembur_x = (jam_pertama * 1.5) + (sisa * 2.0)
+            jam_kerja_float = jam_efektif_sabtu
+    else: # HARI KERJA SENIN-JUMAT
+        jam_efektif_normal = 7.0
+        if jam_kerja_float > jam_efektif_normal: # baru lembur kalau > 7 jam
+            lembur_jam = jam_kerja_float - jam_efektif_normal
+            jam_pertama = min(1.0, lembur_jam)
+            sisa = lembur_jam - jam_pertama
+            lembur_x = (jam_pertama * 1.5) + (sisa * 2.0)
+            jam_kerja_float = jam_efektif_normal
 
-    lembur_x = lembur * 2.0 if is_libur else (1.5 if lembur <= 1 else 1.5 + (lembur-1)*2.0)
-
+    # SHIFT
     jam_masuk = masuk.hour
     jam_pulang = pulang.hour
-    if 7 <= jam_masuk < 8 and jam_kerja >= 10: shift = "LONG SHIFT1"
-    elif 19 <= jam_masuk < 20 and jam_kerja >= 10: shift = "LONG SHIFT2"
+    total_jam_efektif = jam_kerja_float + potong_istirahat
+    if 7 <= jam_masuk < 8 and total_jam_efektif >= 10: shift = "LONG SHIFT1"
+    elif 19 <= jam_masuk < 20 and total_jam_efektif >= 10: shift = "LONG SHIFT2"
     elif 900 <= jam_pulang*60 < 1380: shift = "SHIFT 1"
     else: shift = "SHIFT 2"
 
-    return f"{int(jam_kerja)}:00:00", f"{lembur_x:.2f}", shift, keterangan
+    return f"{int(jam_kerja_float)}:00:00", f"{lembur_x:.2f}", shift, keterangan
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama):
     id_kar = id_kar.zfill(8)
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
     libur_dict = get_libur(masuk_dt.year)
-
     jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), "NORMAL", libur_dict)
-
-    # URUTAN SESUAI SHEET: ID, NAMA, MASUK, PULANG, KERJA, LEMBUR, SHIFT, KETERANGAN
     row_data = [id_kar, nama, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), jam_kerja, jam_lembur, shift, ket]
-
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (pd.to_datetime(absen_df['JAM MASUK'], errors='coerce').dt.strftime('%d/%m/%Y') == tgl_str)]
-
-    if not existing.empty: # UPDATE
+    if not existing.empty:
         row_num = existing.index[0] + 2
         ws_absen.update(f'A{row_num}:H{row_num}', [row_data])
-    else: # INSERT
+    else:
         ws_absen.insert_row(row_data, 2)
-
     load_data.clear()
 
 def auto_alpa_libur():
@@ -113,14 +126,11 @@ def auto_alpa_libur():
         jam_auto = "00:00:00" if is_libur else "23:59:00"
         ket = f"LIBUR NASIONAL: {libur_dict[tgl_api]}" if tgl_api in libur_dict else ("LIBUR MINGGU" if tgl.weekday()==6 else "ALPA")
         shift = "LIBUR" if is_libur else "ALPA"
-
         for _, kar in db_df.iterrows():
             id_kar = kar['ID KARYAWAN']
             nama = kar['NAMA KARYAWAN']
             if absen_df[(absen_df['ID KARYAWAN']==id_kar) & (pd.to_datetime(absen_df['JAM MASUK'], errors='coerce').dt.strftime('%d/%m/%Y')==tgl_str)].empty:
-                # URUTAN SESUAI SHEET
                 new_rows.append([id_kar, nama, f"{tgl_str} {jam_auto}", f"{tgl_str} {jam_auto}", "0:00:00", "0.00", shift, ket])
-
     if new_rows:
         ws_absen.insert_rows(new_rows, 2)
         load_data.clear()
@@ -129,8 +139,13 @@ menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN"])
 
 with menu[0]:
     id_in = st.text_input("Masukkan ID Karyawan").strip().zfill(8)
-    nama = db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
-    if nama: st.info(f"Nama: {nama}")
+    nama = ""
+    if id_in:
+        if id_in in db_df['ID KARYAWAN'].values:
+            nama = db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
+            st.info(f"Nama: {nama}")
+        else:
+            st.error(f"ID {id_in} tidak ada di DATABASE KARYAWAN")
 
     col1, col2 = st.columns(2)
     with col1: tgl_masuk = st.date_input("Tgl Masuk", datetime.now())
@@ -146,7 +161,7 @@ with menu[0]:
             upsert_absen(id_in, masuk_dt, pulang_dt, nama)
             st.success("✅ Data tersimpan")
             st.rerun()
-        else: st.error("ID tidak ditemukan")
+        else: st.warning("Isi ID yg benar dulu")
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
@@ -167,8 +182,6 @@ with menu[1]:
                 new_masuk_jam = st.time_input("Jam Masuk Baru", pd.to_datetime(row['JAM MASUK']).time())
                 new_pulang_tgl = st.date_input("Tgl Pulang Baru", pd.to_datetime(row['JAM PULANG']))
                 new_pulang_jam = st.time_input("Jam Pulang Baru", pd.to_datetime(row['JAM PULANG']).time())
-                status = st.selectbox("Status", ["NORMAL", "TUKAR HARI", "LIBUR"])
-
                 if st.button("SIMPAN EDIT"):
                     masuk_dt = datetime.combine(new_masuk_tgl, new_masuk_jam)
                     pulang_dt = datetime.combine(new_pulang_tgl, new_pulang_jam)
@@ -181,7 +194,6 @@ with menu[2]:
     if st.button("⛪ JALANKAN AUTO ALPA/LIBUR"):
         auto_alpa_libur()
         st.success("✅ Selesai cek 7 hari kebelakang")
-
     if not absen_df.empty:
         st.dataframe(absen_df.sort_values('JAM MASUK', ascending=False), use_container_width=True)
     else:
