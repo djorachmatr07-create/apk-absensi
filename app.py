@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V4.2")
+st.title("📍 APK ABSENSI KARYAWAN V4.3")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -63,10 +63,17 @@ st.success(f"✅ Konek. Karyawan: {len(db_df)} | Data Absen: {len(absen_df)}")
 def get_libur(tahun):
     try:
         res = requests.get(f"https://indonesia-holiday-api.vercel.app/api/{tahun}", timeout=5)
-        return {i['holiday_date']: i['holiday_name'] for i in res.json()}
-    except: return {}
+        data = res.json()
+        return {i['holiday_date']: i['holiday_name'] for i in data}
+    except:
+        st.warning(f"Gagal ambil data libur tahun {tahun}")
+        return {}
 
-LIBUR_DICT = get_libur(datetime.now().year)
+# AMBIL 2025 + 2026 SEKALIAN BIAR AMAN
+LIBUR_DICT = {}
+LIBUR_DICT.update(get_libur(2025))
+LIBUR_DICT.update(get_libur(2026))
+
 KODE_TANPA_JAM_DI_TABEL = ["A", "I", "S", "C", "L"]
 
 def buletin_jam(dt):
@@ -234,11 +241,11 @@ def cek_libur_alpa():
     load_data.clear()
     return count
 
-def update_keterangan_libur(): # FUNGSI BARU
+def update_keterangan_libur():
     if absen_df.empty: return 0
     progress = st.progress(0)
     count = 0
-    data_l = absen_df[absen_df['STATUS'] == 'L']
+    data_l = absen_df[absen_df['STATUS'] == 'L'].copy()
     total = len(data_l)
 
     for i, row in data_l.iterrows():
@@ -255,11 +262,12 @@ def update_keterangan_libur(): # FUNGSI BARU
             else:
                 ket_baru = "LIBUR"
 
-            if row['KETERANGAN']!= ket_baru:
-                row_num = i + 2
-                ws_absen.update(f'G{row_num}:H{row_num}', [['L', ket_baru]])
-                count += 1
-        except: pass
+            row_num = i + 2 # PAKSA UPDATE SEMUA
+            ws_absen.update(f'G{row_num}:H{row_num}', [['L', ket_baru]])
+            count += 1
+        except Exception as e:
+            st.error(f"Error baris {i+2}: {e}")
+            pass
         progress.progress((i + 1) / total)
     load_data.clear()
     return count
@@ -323,7 +331,7 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {MASTER_KODE[kode_pilih]['nama']}")
 
 with menu[2]:
-    col1, col2, col3 = st.columns(3) # JADI 3 TOMBOL
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("🔍 CEK LIBUR & ALPA OTOMATIS", use_container_width=True):
             with st.spinner("Sedang cek 30 hari terakhir..."):
@@ -331,7 +339,7 @@ with menu[2]:
             st.success(f"✅ Selesai! {jml} data Libur/Alpa ditambahkan")
             st.rerun()
     with col2:
-        if st.button("🔄 UPDATE KETERANGAN LIBUR", use_container_width=True, type="primary"): # TOMBOL BARU
+        if st.button("🔄 UPDATE KETERANGAN LIBUR", use_container_width=True, type="primary"):
             with st.spinner("Sedang update semua data L..."):
                 jml = update_keterangan_libur()
             st.success(f"✅ Selesai! {jml} data L diupdate keterangannya")
@@ -342,4 +350,4 @@ with menu[2]:
             st.rerun()
 
     if not absen_df.empty:
-        st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=True), use_container_width=True)
+        st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=False), use_container_width=True) # URUT DARI BARU
