@@ -23,7 +23,7 @@ def connect_gsheet():
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
-st.success("🛜 Konek ke Google Sheet Berhasil")
+st.success("✅ Konek ke Google Sheet Berhasil")
 
 @st.cache_data(ttl=86400)
 def get_libur_nasional(tahun):
@@ -72,7 +72,7 @@ def bulat_masuk(dt_obj):
         return (dt_obj + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     return dt_obj.replace(minute=0, second=0, microsecond=0)
 def bulat_pulang(dt_obj): return dt_obj.replace(minute=0, second=0, microsecond=0)
-def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0): return f"{total_jam * multiplier:.2f}"
+def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0): return f"{total_lembur_jam * multiplier:.2f}"
 
 def tentukan_shift(masuk_dt, pulang_dt):
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
@@ -163,7 +163,7 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX: SKIP HARI INI
+def auto_absen_23_59(): # FIX ANTI DOUBLE: KALAU UDAH ADA ABSEN, SKIP 23:59
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
@@ -174,7 +174,7 @@ def auto_absen_23_59(): # FIX: SKIP HARI INI
             key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
             data_exist.add(key)
 
-    for i in range(1, 15): # MULAI DARI 1 = KEMARIN. HARI INI DI SKIP
+    for i in range(1, 15): # MULAI DARI KEMARIN
         tgl_cek = hari_ini - timedelta(days=i)
         tgl_str = tgl_cek.strftime('%d/%m/%Y')
         tgl_api = tgl_cek.strftime('%Y-%m-%d')
@@ -183,7 +183,20 @@ def auto_absen_23_59(): # FIX: SKIP HARI INI
         is_minggu = tgl_cek.weekday() == 6
         is_tgl_merah = tgl_api in dict_libur
         is_hari_kerja = not is_minggu and not is_tgl_merah
+
         for id_kar in karyawan_ids:
+            # CEK APAKAH HARI INI UDAH ADA ABSEN BENERAN SELAIN 23:59
+            sudah_absen_hari_ini = False
+            for row in all_data[1:]:
+                if str(row[0]).strip().zfill(8) == id_kar and row[1]:
+                    tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+                    if tgl_db == tgl_str and "23:59:00" not in row[1]:
+                        sudah_absen_hari_ini = True
+                        break
+
+            if sudah_absen_hari_ini: # KALAU UDAH ADA, SKIP
+                continue
+
             key_cek = f"{id_kar}_{jam_23_59}"
             if key_cek in data_exist: continue
 
