@@ -55,14 +55,13 @@ def load_absen_data():
     try:
         return ws_absen.get_all_values()
     except:
-        st.warning("Gagal load data. Coba refresh")
         return [headers]
 
 headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"]
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
-def hapus_data_alpa_double():
+def hapus_semua_auto_double(): # HAPUS SEMUA 00:00 DAN 23:59 YG DOBEL
     all_data = load_absen_data()
     rows_to_delete = []
     data_per_tanggal = {}
@@ -71,22 +70,27 @@ def hapus_data_alpa_double():
         row = all_data[i]
         if row[0] and row[1]:
             id_kar = str(row[0]).strip().zfill(8)
-            tgl = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+            try:
+                tgl = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+            except:
+                continue
             key = f"{id_kar}_{tgl}"
             if key not in data_per_tanggal:
                 data_per_tanggal[key] = []
             data_per_tanggal[key].append((i+1, row))
 
     for key, rows in data_per_tanggal.items():
-        if len(rows) > 1:
+        if len(rows) > 1: # KALAU 1 HARI ADA LEBIH DARI 1
             for row_num, row_data in rows:
-                if "23:59:00" in row_data[1] or "00:00:00" in row_data[1]:
+                jam = row_data[1].split(" ")[1]
+                if jam in ["23:59:00", "00:00:00"]: # HAPUS YG AUTO
                     rows_to_delete.append(row_num)
+                    break # CUKUP HAPUS 1
 
     for row_num in sorted(rows_to_delete, reverse=True):
         try:
             ws_absen.delete_rows(row_num)
-            time.sleep(0.2)
+            time.sleep(0.1)
         except:
             pass
     if rows_to_delete:
@@ -192,8 +196,12 @@ def sudah_absen_masuk(id_kar, tanggal_str, all_data):
     id_kar = id_kar.zfill(8)
     for row in all_data[1:]:
         if str(row[0]).strip().zfill(8) == id_kar and row[1]:
-            tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
-            if tgl_db == tanggal_str: return True
+            try:
+                tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+                if tgl_db == tanggal_str and "23:59:00" not in row[1] and "00:00:00" not in row[1]:
+                    return True
+            except:
+                pass
     return False
 def cari_data_belum_pulang(id_kar, all_data):
     id_kar = id_kar.zfill(8)
@@ -202,18 +210,26 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX: LIBUR = 00:00, KERJA = 23:59
+def auto_absen_23_59(): # FIX: CEK BERDASARKAN TGL BUKAN JAM
     try:
-        hapus_data_alpa_double()
+        hapus_semua_auto_double() # BERSIHIN DULU
         all_data = load_absen_data()
         karyawan_ids = list(db_dict.keys())
         hari_ini = datetime.now()
         dict_libur = get_libur_nasional(hari_ini.year)
-        data_exist = set()
+
+        # SIMPAN TGL YG UDAH ADA DATA BENERAN
+        tgl_sudah_ada = set()
         for row in all_data[1:]:
             if row[0] and row[1]:
-                key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
-                data_exist.add(key)
+                try:
+                    id_kar = str(row[0]).strip().zfill(8)
+                    tgl = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+                    jam = row[1].split(" ")[1]
+                    if jam not in ["23:59:00", "00:00:00"]: # HANYA DATA BENERAN
+                        tgl_sudah_ada.add(f"{id_kar}_{tgl}")
+                except:
+                    pass
 
         batch_rows = []
         for i in range(1, 15):
@@ -225,25 +241,16 @@ def auto_absen_23_59(): # FIX: LIBUR = 00:00, KERJA = 23:59
             is_tgl_merah = tgl_api in dict_libur
             is_libur = is_minggu or is_tgl_merah
 
-            # JAM OTOMATIS BEDAIN LIBUR DAN KERJA
             if is_libur:
-                jam_otomatis = tgl_cek.replace(hour=0, minute=0, second=0).strftime('%d/%m/%Y %H:%M:%S') # 00:00
+                jam_otomatis = tgl_cek.replace(hour=0, minute=0, second=0).strftime('%d/%m/%Y %H:%M:%S')
             else:
-                jam_otomatis = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S') # 23:59
+                jam_otomatis = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
 
             for id_kar in karyawan_ids:
-                # CEK UDAH ADA ABSEN BENERAN BELUM
-                sudah_absen_hari_ini = False
-                for row in all_data[1:]:
-                    if str(row[0]).strip().zfill(8) == id_kar and row[1]:
-                        tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
-                        if tgl_db == tgl_str and "23:59:00" not in row[1] and "00:00:00" not in row[1]:
-                            sudah_absen_hari_ini = True
-                            break
-                if sudah_absen_hari_ini: continue
+                key_tgl = f"{id_kar}_{tgl_str}"
 
-                key_cek = f"{id_kar}_{jam_otomatis}"
-                if key_cek in data_exist: continue
+                if key_tgl in tgl_sudah_ada: # KALAU UDAH ADA DATA BENERAN, SKIP
+                    continue
 
                 if is_tgl_merah:
                     keterangan = f"LIBUR NASIONAL: {nama_libur}"
@@ -251,13 +258,11 @@ def auto_absen_23_59(): # FIX: LIBUR = 00:00, KERJA = 23:59
                 elif is_minggu:
                     keterangan = "LIBUR MINGGU OTOMATIS"
                     shift = "LIBUR"
-                elif not is_libur: # HARI KERJA
+                else:
                     keterangan = "ALPA"
                     shift = "ALPA"
-                else: continue
 
-                row_baru = [id_kar, jam_otomatis, jam_otomatis, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan]
-                batch_rows.append(row_baru)
+                batch_rows.append([id_kar, jam_otomatis, jam_otomatis, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan])
 
         if batch_rows:
             ws_absen.insert_rows(batch_rows, 2, value_input_option='USER_ENTERED')
@@ -265,7 +270,7 @@ def auto_absen_23_59(): # FIX: LIBUR = 00:00, KERJA = 23:59
 
         sort_by_tanggal()
     except Exception as e:
-        st.warning(f"Auto absen skip dulu karena: {e}")
+        st.warning(f"Auto absen skip: {e}")
 
 auto_absen_23_59()
 
