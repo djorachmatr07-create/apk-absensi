@@ -50,7 +50,7 @@ def load_db():
 
 db_dict = load_db()
 
-@st.cache_data(ttl=120) # NAEKIN JADI 2 MENIT
+@st.cache_data(ttl=120)
 def load_absen_data():
     try:
         return ws_absen.get_all_values()
@@ -61,6 +61,36 @@ def load_absen_data():
 headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"]
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
+
+def hapus_data_alpa_double():
+    all_data = load_absen_data()
+    rows_to_delete = []
+    data_per_tanggal = {}
+
+    for i in range(1, len(all_data)):
+        row = all_data[i]
+        if row[0] and row[1]:
+            id_kar = str(row[0]).strip().zfill(8)
+            tgl = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
+            key = f"{id_kar}_{tgl}"
+            if key not in data_per_tanggal:
+                data_per_tanggal[key] = []
+            data_per_tanggal[key].append((i+1, row))
+
+    for key, rows in data_per_tanggal.items():
+        if len(rows) > 1:
+            for row_num, row_data in rows:
+                if "23:59:00" in row_data[1] or "00:00:00" in row_data[1]:
+                    rows_to_delete.append(row_num)
+
+    for row_num in sorted(rows_to_delete, reverse=True):
+        try:
+            ws_absen.delete_rows(row_num)
+            time.sleep(0.2)
+        except:
+            pass
+    if rows_to_delete:
+        st.cache_data.clear()
 
 def sort_by_tanggal():
     all_data = load_absen_data()
@@ -172,8 +202,9 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX: PAKE BATCH + TRY EXCEPT
+def auto_absen_23_59(): # FIX: LIBUR = 00:00, KERJA = 23:59
     try:
+        hapus_data_alpa_double()
         all_data = load_absen_data()
         karyawan_ids = list(db_dict.keys())
         hari_ini = datetime.now()
@@ -189,23 +220,29 @@ def auto_absen_23_59(): # FIX: PAKE BATCH + TRY EXCEPT
             tgl_cek = hari_ini - timedelta(days=i)
             tgl_str = tgl_cek.strftime('%d/%m/%Y')
             tgl_api = tgl_cek.strftime('%Y-%m-%d')
-            jam_23_59 = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S')
             nama_libur = dict_libur.get(tgl_api, "")
             is_minggu = tgl_cek.weekday() == 6
             is_tgl_merah = tgl_api in dict_libur
-            is_hari_kerja = not is_minggu and not is_tgl_merah
+            is_libur = is_minggu or is_tgl_merah
+
+            # JAM OTOMATIS BEDAIN LIBUR DAN KERJA
+            if is_libur:
+                jam_otomatis = tgl_cek.replace(hour=0, minute=0, second=0).strftime('%d/%m/%Y %H:%M:%S') # 00:00
+            else:
+                jam_otomatis = tgl_cek.replace(hour=23, minute=59, second=0).strftime('%d/%m/%Y %H:%M:%S') # 23:59
 
             for id_kar in karyawan_ids:
+                # CEK UDAH ADA ABSEN BENERAN BELUM
                 sudah_absen_hari_ini = False
                 for row in all_data[1:]:
                     if str(row[0]).strip().zfill(8) == id_kar and row[1]:
                         tgl_db = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
-                        if tgl_db == tgl_str and "23:59:00" not in row[1]:
+                        if tgl_db == tgl_str and "23:59:00" not in row[1] and "00:00:00" not in row[1]:
                             sudah_absen_hari_ini = True
                             break
                 if sudah_absen_hari_ini: continue
 
-                key_cek = f"{id_kar}_{jam_23_59}"
+                key_cek = f"{id_kar}_{jam_otomatis}"
                 if key_cek in data_exist: continue
 
                 if is_tgl_merah:
@@ -214,15 +251,17 @@ def auto_absen_23_59(): # FIX: PAKE BATCH + TRY EXCEPT
                 elif is_minggu:
                     keterangan = "LIBUR MINGGU OTOMATIS"
                     shift = "LIBUR"
-                elif is_hari_kerja:
+                elif not is_libur: # HARI KERJA
                     keterangan = "ALPA"
                     shift = "ALPA"
                 else: continue
-                batch_rows.append([id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan])
 
-        if batch_rows: # INSERT SEKALIGUS 1X JALAN
+                row_baru = [id_kar, jam_otomatis, jam_otomatis, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan]
+                batch_rows.append(row_baru)
+
+        if batch_rows:
             ws_absen.insert_rows(batch_rows, 2, value_input_option='USER_ENTERED')
-            time.sleep(2) # KASIH JEDA 2 DETIK
+            time.sleep(2)
 
         sort_by_tanggal()
     except Exception as e:
