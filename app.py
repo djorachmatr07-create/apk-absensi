@@ -7,7 +7,22 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK V8.0")
+st.title("📍 APK V8.2")
+
+# CSS BUAT TOMBOL MERAH
+st.markdown("""
+<style>
+div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {
+    background-color: #DC2626;
+    color: white;
+    border: none;
+}
+div.stButton > button[kind="primary"][data-testid="baseButton-secondary"]:hover {
+    background-color: #B91C1C;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -145,7 +160,6 @@ def update_semua_keterangan():
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
-# MENU ABSEN 2 STEP
 with menu[0]:
     id_in = st.text_input("Masukkan ID Karyawan").strip().zfill(8)
     nama = ""
@@ -163,39 +177,43 @@ with menu[0]:
     if id_in and not absen_df.empty:
         data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TGL'] == tgl_str)]
 
-    DAFTAR_STATUS_ABSEN = {
-        "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU",
-        "TL": "TL - TUKAR LIBUR", "I": "I - IZIN",
-        "S": "S - SAKIT", "C": "C - CUTI"
-    }
-    status_pilih = st.selectbox("Pilih Status", options=list(DAFTAR_STATUS_ABSEN.keys()), format_func=lambda x: DAFTAR_STATUS_ABSEN[x])
+    with st.expander("⚙️ Ubah Status Khusus: GH, GHS, TL, I, S, C"):
+        DAFTAR_STATUS_ABSEN = {
+            "H": "H - HADIR NORMAL",
+            "GH": "GH - GANTI HARI",
+            "GHS": "GHS - GANTI HARI SABTU",
+            "TL": "TL - TUKAR LIBUR",
+            "I": "I - IZIN",
+            "S": "S - SAKIT",
+            "C": "C - CUTI"
+        }
+        status_pilih = st.selectbox("Pilih Status Khusus", options=list(DAFTAR_STATUS_ABSEN.keys()), format_func=lambda x: DAFTAR_STATUS_ABSEN[x], index=0)
 
-    # STEP 1: KALAU BELUM ABSEN MASUK
+    # STEP 1: ABSEN MASUK
     if data_hari_ini.empty:
         st.info("📌 Silahkan Absen Masuk Dulu")
         jam_masuk = st.time_input("Jam Masuk", datetime.now().time())
-
         if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama):
             masuk_dt = datetime.combine(tgl, jam_masuk)
-            pulang_dt = masuk_dt # Sementara sama dengan jam masuk
+            pulang_dt = masuk_dt
             upsert_absen(id_in, masuk_dt, pulang_dt, nama, status_pilih)
-            st.balloons() # ILUSTRASI BERHASIL
-            st.success(f"✅ ABSEN MASUK BERHASIL!\nJam: {masuk_dt.strftime('%H:%M')}")
+            st.balloons()
+            st.success(f"✅ ABSEN MASUK BERHASIL!\nJam: {masuk_dt.strftime('%H:%M')} | Status: {DAFTAR_STATUS_ABSEN[status_pilih]}")
             st.rerun()
 
-    # STEP 2: KALAU SUDAH ABSEN MASUK, TAMPILKAN ABSEN PULANG
+    # STEP 2: ABSEN PULANG - TOMBOL MERAH
     else:
         data = data_hari_ini.iloc[0]
-        st.success(f"📌 Sudah Absen Masuk: {pd.to_datetime(data['JAM MASUK']).strftime('%H:%M')}")
+        st.success(f"📌 Sudah Absen Masuk: {pd.to_datetime(data['JAM MASUK']).strftime('%H:%M')} | Status: {data['STATUS']}")
 
         if data['JAM MASUK'] == data['JAM PULANG']:
             st.warning("Silahkan Absen Pulang")
             jam_pulang = st.time_input("Jam Pulang", datetime.now().time())
-            if st.button("🔴 ABSEN PULANG", use_container_width=True, type="primary"):
+            if st.button("🔴 ABSEN PULANG", use_container_width=True, type="secondary"): # MERAH
                 masuk_dt = pd.to_datetime(data['JAM MASUK'])
                 pulang_dt = datetime.combine(tgl, jam_pulang)
                 upsert_absen(id_in, masuk_dt, pulang_dt, nama, data['STATUS'])
-                st.balloons() # ILUSTRASI BERHASIL
+                st.balloons()
                 st.success(f"✅ ABSEN PULANG BERHASIL!\nJam: {pulang_dt.strftime('%H:%M')}")
                 st.rerun()
         else:
