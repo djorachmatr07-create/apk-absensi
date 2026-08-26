@@ -23,7 +23,7 @@ def connect_gsheet():
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
-st.success("✅ Konek ke Google Sheet Berhasil")
+st.success("🛜 Konek ke Google Sheet Berhasil")
 
 @st.cache_data(ttl=86400)
 def get_libur_nasional(tahun):
@@ -72,7 +72,7 @@ def bulat_masuk(dt_obj):
         return (dt_obj + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     return dt_obj.replace(minute=0, second=0, microsecond=0)
 def bulat_pulang(dt_obj): return dt_obj.replace(minute=0, second=0, microsecond=0)
-def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0): return f"{total_lembur_jam * multiplier:.2f}"
+def hitung_lembur_multiplier(total_lembur_jam, multiplier=2.0): return f"{total_jam * multiplier:.2f}"
 
 def tentukan_shift(masuk_dt, pulang_dt):
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
@@ -110,7 +110,7 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     elif status_hari == "TUKAR HARI": is_libur = False; keterangan = "TUKAR HARI"
     else:
         if nama_libur:
-            is_libur = True; keterangan = f"LIBUR NASIONAL: {nama_libur}" # NAMA LIBUR MUNCUL
+            is_libur = True; keterangan = f"LIBUR NASIONAL: {nama_libur}"
         elif weekday == 6:
             is_libur = True; keterangan = "LIBUR MINGGU"
         elif weekday == 5:
@@ -163,7 +163,7 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX: KETERANGAN NGIKUT KALENDER
+def auto_absen_23_59(): # FIX: SKIP HARI INI
     all_data = ws_absen.get_all_values()
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
@@ -174,7 +174,7 @@ def auto_absen_23_59(): # FIX: KETERANGAN NGIKUT KALENDER
             key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
             data_exist.add(key)
 
-    for i in range(14):
+    for i in range(1, 15): # MULAI DARI 1 = KEMARIN. HARI INI DI SKIP
         tgl_cek = hari_ini - timedelta(days=i)
         tgl_str = tgl_cek.strftime('%d/%m/%Y')
         tgl_api = tgl_cek.strftime('%Y-%m-%d')
@@ -188,7 +188,7 @@ def auto_absen_23_59(): # FIX: KETERANGAN NGIKUT KALENDER
             if key_cek in data_exist: continue
 
             if is_tgl_merah:
-                keterangan = f"LIBUR NASIONAL: {nama_libur}" # NAMA LIBUR KELUAR
+                keterangan = f"LIBUR NASIONAL: {nama_libur}"
                 shift = "LIBUR"
             elif is_minggu:
                 keterangan = "LIBUR MINGGU OTOMATIS"
@@ -301,7 +301,7 @@ with menu[0]:
                 else: st.error("❌ Tidak ada data absen masuk yg belum pulang")
             else: st.warning("Isi ID yang benar dulu min")
 
-    with col3: # RECALCULATE NGIKUT KALENDER
+    with col3:
         if st.button("🔄 RECALCULATE SEMUA", use_container_width=True):
             if id_karyawan_raw and nama:
                 dict_libur = get_libur_nasional(datetime.now().year)
@@ -312,10 +312,7 @@ with menu[0]:
                         row_index = i + 1
                         jam_masuk = ws_absen.cell(row_index, 2).value
                         jam_pulang = ws_absen.cell(row_index, 3).value
-
-                        # PENTING: Hitung ulang paksa pakai NORMAL biar cek kalender
                         jam_kerja, jam_lembur, shift, ket = hitung_jam(jam_masuk, jam_pulang, dict_libur, "NORMAL", is_edit=False)
-
                         cell_list.append(gspread.Cell(row_index, 5, jam_kerja))
                         cell_list.append(gspread.Cell(row_index, 6, jam_lembur))
                         cell_list.append(gspread.Cell(row_index, 7, shift))
