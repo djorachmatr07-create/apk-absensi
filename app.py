@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V7.4 - SHIFT FIX")
+st.title("📍 APK ABSENSI V7.5 - SHIFT = STATUS-SHIFT")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -33,8 +33,11 @@ def get_libur_dari_ics():
                 start = component.get('dtstart').dt
                 if hasattr(start, 'strftime'): start = start.strftime('%Y-%m-%d')
                 libur[start] = str(component.get('summary'))
+        st.sidebar.success(f"✅ {len(libur)} Hari Libur Terload")
         return libur
-    except: return {}
+    except Exception as e: 
+        st.sidebar.error(f"Gagal load ICS: {e}")
+        return {}
 
 LIBUR_NASIONAL = get_libur_dari_ics()
 
@@ -61,8 +64,10 @@ def bulatkan_ke_jam_pas(dt):
 def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
+    # 1. KALAU MASUK
     if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0:
         return "MASUK"
+    # 2. KALAU TIDAK KERJA
     if jam_kerja_float == 0:
         if status == 'L' or tgl_str in LIBUR_NASIONAL:
             if tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
@@ -76,19 +81,28 @@ def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_k
         else: return "TIDAK MASUK"
     return "HARI KERJA"
 
-def cek_shift(jam_masuk_dt, jam_pulang_dt, jam_kerja_float, keterangan, status):
-    # INI CUMA NGATUR KOLOM SHIFT SAJA
-    if 'LIBUR' in keterangan: return 'SL' # SHIFT LIBUR
+def cek_shift(jam_masuk_dt, jam_kerja_float, keterangan, status):
+    # 1. KALAU TIDAK MASUK / LIBUR
+    if 'LIBUR' in keterangan: return 'SL'
     if status == 'A': return 'A'
     if status == 'I': return 'I'
     if status == 'S': return 'S'
     if status == 'C': return 'C'
     if jam_kerja_float == 0: return '-'
-    if jam_kerja_float >= 11.5: return 'LS' # LONGSHIFT
-    jam = jam_masuk_dt.hour
-    if 7 <= jam < 15: return 'S1'
-    elif 15 <= jam < 23: return 'S2'
-    else: return 'S3' # 23-07
+    
+    # 2. KALAU MASUK - CEK SHIFT DULU
+    if jam_kerja_float >= 11.5: shift_code = 'LS'
+    else:
+        jam = jam_masuk_dt.hour
+        if 7 <= jam < 15: shift_code = 'S1'
+        elif 15 <= jam < 23: shift_code = 'S2'
+        else: shift_code = 'S3'
+    
+    # 3. GABUNGKAN DENGAN STATUS HANYA KALAU MASUK
+    if keterangan == "MASUK":
+        return f"{status}-{shift_code}"
+    else:
+        return shift_code
 
 def hitung_lembur(jam_kerja_float):
     jam_normal = 8.0
@@ -106,8 +120,8 @@ def hitung(masuk_dt, pulang_dt, status):
 
     jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
-    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status) # KETERANGAN TETAP DARI SINI
-    shift = cek_shift(masuk_dt, pulang_dt, jam_kerja_float, keterangan, status) # SHIFT DIHITUNG TERPISAH
+    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status)
+    shift = cek_shift(masuk_dt, jam_kerja_float, keterangan, status)
     jam_lembur = hitung_lembur(jam_kerja_float)
         
     return f"{jam_kerja_float:.2f}", jam_lembur, shift, keterangan, jam_masuk_str, jam_pulang_str
@@ -153,12 +167,13 @@ with menu[0]:
     col3, col4 = st.columns(2)
     with col3: tgl_pulang = st.date_input("Tgl Pulang", datetime.now())
     with col4: jam_pulang = st.time_input("Jam Pulang", datetime.now().time())
-    if st.button("SIMPAN ABSEN", use_container_width=True):
+    if st.button("SIMPAN ABSEN", use_container_width=True, type="primary"):
         if nama:
             masuk_dt = datetime.combine(tgl_masuk, jam_masuk)
             pulang_dt = datetime.combine(tgl_pulang, jam_pulang)
             upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H")
             st.success("✅ Data tersimpan")
+            st.rerun()
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
@@ -166,7 +181,7 @@ with menu[1]:
         pw = st.text_input("Password Admin", type="password")
         if st.button("LOGIN"):
             if pw == PASSWORD_ADMIN: st.session_state.login = True; st.rerun()
-            else: st.error("Salah")
+            else: st.error("Password Salah")
     else:
         if st.button("LOGOUT"): st.session_state.login = False; st.rerun()
         id_edit = st.text_input("ID yg mau diedit").strip().zfill(8)
@@ -175,18 +190,21 @@ with menu[1]:
             if not data_kar.empty:
                 pilih = st.selectbox("Pilih Tanggal", data_kar.sort_values('JAM MASUK DT')['JAM MASUK'].tolist())
                 row = data_kar[data_kar['JAM MASUK']==pilih].iloc[0]
-                kode_pilih = st.selectbox("Kode Status", options=["H","A","I","S","C","L"])
+                kode_pilih = st.selectbox("Ubah Status Menjadi", options=["H","A","I","S","C","L"])
                 if st.button("SIMPAN EDIT"):
                     masuk_dt = pd.to_datetime(row['JAM MASUK'])
                     pulang_dt = pd.to_datetime(row['JAM PULANG'])
                     upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih)
                     st.success(f"✅ Edit berhasil. Status: {kode_pilih}")
+                    st.rerun()
 
 with menu[2]:
-    if st.button("🔄 UPDATE SEMUA KETERANGAN DARI KALENDER", type="primary"):
-        jml = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml} data diupdate")
-        st.rerun()
-
+    st.warning("Tombol ini untuk update semua data lama agar ikut aturan baru")
+    if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True):
+        with st.spinner("Mohon tunggu..."):
+            jml = update_semua_keterangan()
+            st.success(f"✅ Selesai! {jml} data diupdate")
+            st.rerun()
+        
 with menu[3]:
-    st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=False), use_container_width=True)
+    st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=False), use_container_width=True, height=600)
