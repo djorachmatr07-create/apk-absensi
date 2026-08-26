@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.0")
+st.title("📍 APK ABSENSI KARYAWAN V3.1")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -17,7 +17,8 @@ MASTER_KODE = {
     "S": {"nama": "SAKIT", "gaji": "100% - 75%", "jam": "0 jam. 3 hari pertama full"},
     "C": {"nama": "CUTI", "gaji": "100%", "jam": "0 jam. Jatah 12 hari/tahun"},
     "L": {"nama": "LIBUR", "gaji": "100%", "jam": "0 jam"},
-    "GH": {"nama": "GANTI HARI", "gaji": "100%", "jam": "Jam kerja dihitung di hari pengganti"},
+    "GH": {"nama": "GANTI HARI BIASA", "gaji": "100%", "jam": "Efektif 7 jam"},
+    "GHS": {"nama": "GANTI HARI SABTU", "gaji": "100%", "jam": "Efektif 5 jam"}, # KODE BARU
     "OT": {"nama": "LEMBUR", "gaji": "1.5x - 2x", "jam": "Tambah jam lembur"},
     "TL": {"nama": "TERLAMBAT", "gaji": "100%", "jam": "Jam kerja - jam telat"},
     "PC": {"nama": "PULANG CEPAT", "gaji": "100%", "jam": "Jam kerja - jam PC"},
@@ -68,10 +69,10 @@ def buletin_jam(dt):
 
 def get_shift_info(masuk_dt, is_sabtu=False):
     jam = masuk_dt.hour
-    if is_sabtu: # JAM SHIFT KHUSUS SABTU FINAL
+    if is_sabtu: # JAM SHIFT SABTU
         if 7 <= jam < 12: return "SHIFT 1 SABTU", masuk_dt.replace(hour=12, minute=0, second=0)
         elif 12 <= jam < 17: return "SHIFT 2 SABTU", masuk_dt.replace(hour=17, minute=0, second=0)
-        else: return "SHIFT 3 SABTU", masuk_dt.replace(hour=23, minute=0, second=0) # 17-23
+        else: return "SHIFT 3 SABTU", masuk_dt.replace(hour=23, minute=0, second=0)
     else: # JAM SHIFT HARI BIASA
         if 7 <= jam < 15: return "SHIFT 1", masuk_dt.replace(hour=15, minute=0, second=0)
         elif 15 <= jam < 23: return "SHIFT 2", masuk_dt.replace(hour=23, minute=0, second=0)
@@ -89,12 +90,7 @@ def hitung_lembur_normal(lembur_jam):
 def hitung(masuk_dt, pulang_dt, status, libur_dict):
     if not masuk_dt or not pulang_dt: return "0:00:00", "0.00", "", ""
 
-    # KODE KHUS LANGSUNG RETURN
-    if status == "A": return "0:00:00", "0.00", "ALPA", "ALPA"
-    if status == "I": return "0:00:00", "0.00", "IZIN", "IZIN"
-    if status == "S": return "0:00:00", "0.00", "SAKIT", "SAKIT"
-    if status == "C": return "0:00:00", "0.00", "CUTI", "CUTI"
-    if status == "L": return "0:00:00", "0.00", "LIBUR", "LIBUR"
+    if status in ["A","I","S","C","L"]: return "0:00:00", "0.00", status, status
     if status == "SH": return "4:00:00", "0.00", "SETENGAH HARI", "SETENGAH HARI"
     if status == "DL": return "8:00:00", "0.00", "DINAS LUAR", "DINAS LUAR"
     if status == "WFH": return "8:00:00", "0.00", "WFH", "WORK FROM HOME"
@@ -107,22 +103,21 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
     is_tgl_merah = tgl in libur_dict
     is_minggu = weekday == 6
     is_sabtu = weekday == 5
-    is_tukar_hari = status == "GH"
-    is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari
-
-    # LOGIKA ISTIRAHAT: HANYA POTONG 1 JAM KALAU >= 8 JAM
-    potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
-    jam_kerja_float = total_jam_mentah - potong_istirahat
-    if jam_kerja_float < 0: jam_kerja_float = 0
+    is_tukar_hari_biasa = status == "GH"
+    is_tukar_hari_sabtu = status == "GHS" # FLAG BARU
+    is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari_biasa and not is_tukar_hari_sabtu
 
     keterangan = "HARI KERJA"
-    if is_tukar_hari: keterangan = "GANTI HARI"
+    if is_tukar_hari_biasa: keterangan = "GANTI HARI BIASA"
+    elif is_tukar_hari_sabtu: keterangan = "GANTI HARI SABTU" # KET BARU
     elif is_tgl_merah: keterangan = f"LIBUR NASIONAL: {libur_dict[tgl]}"
     elif is_minggu: keterangan = "LIBUR MINGGU"
     elif is_sabtu: keterangan = "SABTU"
 
     shift, jam_efektif_pulang = get_shift_info(masuk_dt, is_sabtu)
     lembur_x = 0.0
+    jam_kerja_float = total_jam_mentah - (1.0 if total_jam_mentah >= 8 else 0.0)
+    if jam_kerja_float < 0: jam_kerja_float = 0
     jam_kerja_final = jam_kerja_float
 
     if is_libur: # MINGGU / TGL MERAH
@@ -132,15 +127,21 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
         if pulang_bulet > batas_lembur:
             lembur_tambahan = (pulang_bulet - batas_lembur).total_seconds() / 3600
             lembur_x += lembur_tambahan * 2.0
-    elif is_sabtu: # SABTU EFEKTIF 5 JAM
-        jam_efektif_sabtu = 5.0
-        jam_kerja_final = min(jam_kerja_float, jam_efektif_sabtu)
-        if jam_kerja_float > jam_efektif_sabtu:
-            lembur_jam = jam_kerja_float - jam_efektif_sabtu
+    elif is_sabtu: # SABTU ASLI
+        jam_efektif = 5.0
+        jam_kerja_final = min(jam_kerja_float, jam_efektif)
+        if jam_kerja_float > jam_efektif:
+            lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    else: # SENIN-JUMAT + TUKAR HARI
-        jam_efektif_biasa = 7.0
-        jam_kerja_final = min(jam_kerja_float, jam_efektif_biasa)
+    elif is_tukar_hari_sabtu: # GANTI HARI SABTU - INI KUNCINYA
+        jam_efektif = 5.0 # PAKE EFEKTIF 5 JAM
+        jam_kerja_final = min(jam_kerja_float, jam_efektif)
+        if jam_kerja_float > jam_efektif:
+            lembur_jam = jam_kerja_float - jam_efektif
+            lembur_x = hitung_lembur_normal(lembur_jam)
+    else: # SENIN-JUMAT + GANTI HARI BIASA
+        jam_efektif = 7.0
+        jam_kerja_final = min(jam_kerja_float, jam_efektif)
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
         if pulang_bulet > batas_lembur:
             lembur_jam = (pulang_bulet - batas_lembur).total_seconds() / 3600
