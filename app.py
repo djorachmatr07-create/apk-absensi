@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V4.0")
+st.title("📍 APK ABSENSI KARYAWAN V4.1")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -113,20 +113,37 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
     is_tukar_hari_sabtu = status == "GHS"
     is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari_biasa and not is_tukar_hari_sabtu
 
-    keterangan = "HARI KERJA"
-    if is_tukar_hari_biasa: keterangan = "GANTI HARI BIASA"
-    elif is_tukar_hari_sabtu: keterangan = "GANTI HARI SABTU"
-    elif is_tgl_merah: keterangan = f"LIBUR NASIONAL: {LIBUR_DICT[tgl]}"
-    elif is_minggu: keterangan = "LIBUR MINGGU"
-    elif is_sabtu: keterangan = "SABTU"
+    # LOGIKA KETERANGAN BARU
+    if is_tukar_hari_biasa:
+        keterangan = "GANTI HARI BIASA"
+    elif is_tukar_hari_sabtu:
+        keterangan = "GANTI HARI SABTU"
+    elif status == "L": # KALAU MANUAL SET L
+        if is_tgl_merah:
+            keterangan = f"LIBUR NASIONAL: {LIBUR_DICT[tgl]}"
+        elif is_minggu:
+            keterangan = "LIBUR MINGGU"
+        else:
+            keterangan = "LIBUR"
+    elif is_tgl_merah:
+        keterangan = f"LIBUR NASIONAL: {LIBUR_DICT[tgl]}"
+    elif is_minggu:
+        keterangan = "LIBUR MINGGU"
+    elif is_sabtu:
+        keterangan = "SABTU"
+    else:
+        keterangan = "HARI KERJA"
 
-    # FIX UTAMA: KALAU GH DI SABTU ANGGAP HARI KERJA BIASA
-    if is_tukar_hari_biasa and is_sabtu:
+    # LOGIKA SHIFT BARU
+    if status == "L":
+        shift = "L"
+    elif is_tukar_hari_biasa and is_sabtu:
         efektif_is_sabtu = False
+        shift, jam_efektif_pulang = get_shift_info(masuk_dt, efektif_is_sabtu)
     else:
         efektif_is_sabtu = is_sabtu
+        shift, jam_efektif_pulang = get_shift_info(masuk_dt, efektif_is_sabtu)
 
-    shift, jam_efektif_pulang = get_shift_info(masuk_dt, efektif_is_sabtu)
     lembur_x = 0.0
     jam_kerja_float = total_jam_mentah - (1.0 if total_jam_mentah >= 8 else 0.0)
     if jam_kerja_float < 0: jam_kerja_float = 0
@@ -139,19 +156,19 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
         if pulang_bulet > batas_lembur:
             lembur_tambahan = (pulang_bulet - batas_lembur).total_seconds() / 3600
             lembur_x += lembur_tambahan * 2.0
-    elif efektif_is_sabtu: # SABTU NORMAL
+    elif efektif_is_sabtu:
         jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    elif is_tukar_hari_sabtu: # GHS
+    elif is_tukar_hari_sabtu:
         jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    else: # SENIN-JUMAT + GH
+    else:
         jam_efektif = 7.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
@@ -159,7 +176,7 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
             lembur_jam = (pulang_bulet - batas_lembur).total_seconds() / 3600
             lembur_x = hitung_lembur_normal(lembur_jam)
 
-    if total_jam_mentah >= 10: shift = shift.replace("SHIFT", "LONG SHIFT")
+    if total_jam_mentah >= 10 and status not in ["L"]: shift = shift.replace("SHIFT", "LONG SHIFT")
     return f"{int(jam_kerja_final)}:00:00", f"{lembur_x:.2f}", shift, keterangan, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=False):
@@ -204,7 +221,7 @@ def cek_libur_alpa():
             nama = db_df[db_df['ID KARYAWAN']==id_kar]['NAMA KARYAWAN'].values[0]
             if tgl_str not in sudah_absen[sudah_absen['ID KARYAWAN']==id_kar]['TGL'].values:
                 if is_tgl_merah:
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L") # STATUS L
                     count += 1
                 elif is_minggu:
                     upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
