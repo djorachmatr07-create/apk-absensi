@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.1 - ANTI ERROR KOLOM")
+st.title("📍 APK ABSENSI V9.2 - FINAL ANTI ERROR")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -40,22 +40,36 @@ def get_libur_dari_ics():
 
 LIBUR_NASIONAL = get_libur_dari_ics()
 
+def hitung_lembur_baru(jam_kerja_float):
+    try:
+        jam_kerja_float = float(jam_kerja_float or 0)
+    except:
+        jam_kerja_float = 0.0
+    jam_normal = 7.0
+    lembur_1_5 = 0.0
+    lembur_2_0 = 0.0
+    if jam_kerja_float > jam_normal:
+        jam_lembur_total = jam_kerja_float - jam_normal
+        if jam_lembur_total >= 1.0:
+            lembur_1_5 = 1.0
+            if jam_lembur_total > 1.0:
+                lembur_2_0 = jam_lembur_total - 1.0
+    return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
+
 @st.cache_data(ttl=300)
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
     
-    # KUNCI: AMBIL HEADER DARI SHEET LANGSUNG
     all_values = ws_absen.get_all_values()
     if len(all_values) > 1:
-        header = all_values[0] # Ambil header asli dari sheet
+        header = all_values[0]
         data = all_values[1:]
         absen = pd.DataFrame(data, columns=header)
     else:
         header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']
         absen = pd.DataFrame(columns=header)
 
-    # PASTIKAN 9 KOLOM PENTING ADA
     for col in ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']:
         if col not in absen.columns: absen[col] = ''
 
@@ -63,7 +77,9 @@ def load_data():
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
-        absen[['LEMBUR 1.5', 'LEMBUR 2.0']] = absen.apply(lambda x: pd.Series(hitung_lembur_baru(float(x['JAM KERJA'] or 0))), axis=1)
+        # FIX: PAKE LAMBDA AMAN
+        absen['LEMBUR 1.5'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[0])
+        absen['LEMBUR 2.0'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[1])
     else:
         absen['JAM MASUK DT'] = pd.to_datetime([])
         absen['TGL'] = []
@@ -111,18 +127,6 @@ def cek_shift(jam_masuk_dt, jam_pulang_dt, jam_kerja_float, keterangan, status):
     if keterangan == "MASUK": return f"{status}-{shift_code}"
     else: return shift_code
 
-def hitung_lembur_baru(jam_kerja_float):
-    jam_normal = 7.0
-    lembur_1_5 = 0.0
-    lembur_2_0 = 0.0
-    if jam_kerja_float > jam_normal:
-        jam_lembur_total = jam_kerja_float - jam_normal
-        if jam_lembur_total >= 1.0:
-            lembur_1_5 = 1.0
-            if jam_lembur_total > 1.0:
-                lembur_2_0 = jam_lembur_total - 1.0
-    return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
-
 def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
@@ -148,7 +152,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_kerja = "0.00"
         jam_lembur = "0.00"
         shift = status
-        ket = cek_keterangan_dari_tanggal(datetime.now(), "", 0, status)
+        ket = cek_keterangan_dari_tanggal(datetime.now(), "", "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
