@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.4")
+st.title("📍 APK ABSENSI KARYAWAN V3.7")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -50,8 +50,10 @@ def load_data():
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+        if 'STATUS' not in absen.columns:
+            absen['STATUS'] = 'H'
     else:
-        absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"])
+        absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN", "STATUS"])
     return db, absen
 
 db_df, absen_df = load_data()
@@ -65,6 +67,7 @@ def get_libur(tahun):
     except: return {}
 
 LIBUR_DICT = get_libur(datetime.now().year)
+KODE_TANPA_JAM_DI_TABEL = ["A", "I", "S", "C", "L"] # CUMA BUAT DI TABEL REKAP
 
 def buletin_jam(dt):
     return dt.replace(minute=0, second=0)
@@ -89,13 +92,15 @@ def hitung_lembur_normal(lembur_jam):
     sisa = lembur_jam - jam_pertama
     return (jam_pertama * 1.5) + (sisa * 2.0)
 
-def hitung(masuk_dt, pulang_dt, status):
-    if not masuk_dt or not pulang_dt: return "0:00:00", "0.00", "", ""
+def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
+    # KALAU KODE LIBUR DAN KOSONGIN_JAM=TRUE
+    if status in KODE_TANPA_JAM_DI_TABEL and kosongin_jam:
+        return "0:00:00", "0.00", status, status, "", ""
 
-    if status in ["A","I","S","C","L"]: return "0:00:00", "0.00", status, status
-    if status == "SH": return "4:00:00", "0.00", "SETENGAH HARI", "SETENGAH HARI"
-    if status == "DL": return "8:00:00", "0.00", "DINAS LUAR", "DINAS LUAR"
-    if status == "WFH": return "8:00:00", "0.00", "WFH", "WORK FROM HOME"
+    if status in ["A","I","S","C","L"]: return "0:00:00", "0.00", status, status, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
+    if status == "SH": return "4:00:00", "0.00", "SETENGAH HARI", status, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
+    if status == "DL": return "8:00:00", "0.00", "DINAS LUAR", status, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
+    if status == "WFH": return "8:00:00", "0.00", "WFH", status, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
 
     pulang_bulet = buletin_jam(pulang_dt)
     total_jam_mentah = (pulang_bulet - masuk_dt).total_seconds() / 3600
@@ -150,33 +155,35 @@ def hitung(masuk_dt, pulang_dt, status):
             lembur_x = hitung_lembur_normal(lembur_jam)
 
     if total_jam_mentah >= 10: shift = shift.replace("SHIFT", "LONG SHIFT")
-    return f"{int(jam_kerja_final)}:00:00", f"{lembur_x:.2f}", shift, keterangan
+    return f"{int(jam_kerja_final)}:00:00", f"{lembur_x:.2f}", shift, keterangan, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
 
-def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
+def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=False):
     id_kar = id_kar.zfill(8)
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
-    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, status)
-    row_data = [id_kar, nama, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), jam_kerja, jam_lembur, shift, ket]
+    jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status, kosongin_jam)
+    row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['JAM MASUK DT'].dt.strftime('%d/%m/%Y') == tgl_str)]
     if not existing.empty:
         row_num = existing.index[0] + 2
-        ws_absen.update(f'A{row_num}:H{row_num}', [row_data])
+        ws_absen.update(f'A{row_num}:I{row_num}', [row_data])
     else:
         ws_absen.insert_row(row_data, 2)
-    load_data.clear() # CUKUP INI AJA, HAPUS GLOBAL
+    load_data.clear()
 
 def rekalkulasi_semua():
     progress = st.progress(0)
     total = len(absen_df)
     for i, row in absen_df.iterrows():
-        if pd.notna(row['JAM MASUK DT']) and row['KETERANGAN'] not in ['ALPA', 'LIBUR']:
-            try:
-                masuk_dt = pd.to_datetime(row['JAM MASUK'])
-                pulang_dt = pd.to_datetime(row['JAM PULANG'])
-                jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, "H")
-                row_num = i + 2
-                ws_absen.update(f'E{row_num}:H{row_num}', [[jam_kerja, jam_lembur, shift, ket]])
-            except: pass
+        try:
+            status_sekarang = row.get('STATUS', 'H')
+            masuk_dt = pd.to_datetime(row['JAM MASUK'])
+            pulang_dt = pd.to_datetime(row['JAM PULANG'])
+            # KALAU REKALKULASI DAN STATUS LIBUR, KOSONGIN JAMNYA
+            kosongin = status_sekarang in KODE_TANPA_JAM_DI_TABEL
+            jam_kerja, jam_lembur, shift, ket, jm, jp = hitung(masuk_dt, pulang_dt, status_sekarang, kosongin)
+            row_num = i + 2
+            ws_absen.update(f'C{row_num}:I{row_num}', [[jm, jp, jam_kerja, jam_lembur, shift, ket, status_sekarang]])
+        except: pass
         progress.progress((i + 1) / total)
     load_data.clear()
 
@@ -223,17 +230,21 @@ with menu[1]:
                 row = data_kar[data_kar['JAM MASUK']==pilih].iloc[0]
                 kode_pilih = st.selectbox("Kode Status", options=list(MASTER_KODE.keys()), format_func=lambda x: f"{x} - {MASTER_KODE[x]['nama']}")
                 st.info(f"**{MASTER_KODE[kode_pilih]['nama']}** | Gaji: {MASTER_KODE[kode_pilih]['gaji']} | Jam: {MASTER_KODE[kode_pilih]['jam']}")
+
+                # EDIT TETEP MUNCUL JAM
                 col1, col2 = st.columns(2)
-                with col1: new_masuk_tgl = st.date_input("Tgl Masuk Baru", pd.to_datetime(row['JAM MASUK']))
-                with col2: new_masuk_jam = st.time_input("Jam Masuk Baru", pd.to_datetime(row['JAM MASUK']).time())
+                with col1: new_masuk_tgl = st.date_input("Tgl Masuk Baru", pd.to_datetime(row['JAM MASUK']) if pd.notna(row['JAM MASUK DT']) else datetime.now())
+                with col2: new_masuk_jam = st.time_input("Jam Masuk Baru", pd.to_datetime(row['JAM MASUK']).time() if pd.notna(row['JAM MASUK DT']) else datetime.now().time())
                 col3, col4 = st.columns(2)
-                with col3: new_pulang_tgl = st.date_input("Tgl Pulang Baru", pd.to_datetime(row['JAM PULANG']))
-                with col4: new_pulang_jam = st.time_input("Jam Pulang Baru", pd.to_datetime(row['JAM PULANG']).time())
+                with col3: new_pulang_tgl = st.date_input("Tgl Pulang Baru", pd.to_datetime(row['JAM PULANG']) if pd.notna(row['JAM MASUK DT']) else datetime.now())
+                with col4: new_pulang_jam = st.time_input("Jam Pulang Baru", pd.to_datetime(row['JAM PULANG']).time() if pd.notna(row['JAM MASUK DT']) else datetime.now().time())
+
                 if st.button("SIMPAN EDIT"):
                     masuk_dt = datetime.combine(new_masuk_tgl, new_masuk_jam)
                     pulang_dt = datetime.combine(new_pulang_tgl, new_pulang_jam)
                     with st.spinner("Menyimpan 1-3 detik..."):
-                        upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih)
+                        # EDIT TIDAK KOSONGIN JAM
+                        upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih, kosongin_jam=False)
                     st.success(f"✅ Edit berhasil. Status: {MASTER_KODE[kode_pilih]['nama']}")
 
 with menu[2]:
