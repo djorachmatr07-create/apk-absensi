@@ -61,7 +61,7 @@ headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
-def hapus_semua_auto_double(): # HAPUS SEMUA 00:00 DAN 23:59 YG DOBEL
+def hapus_semua_auto_double():
     all_data = load_absen_data()
     rows_to_delete = []
     data_per_tanggal = {}
@@ -80,12 +80,12 @@ def hapus_semua_auto_double(): # HAPUS SEMUA 00:00 DAN 23:59 YG DOBEL
             data_per_tanggal[key].append((i+1, row))
 
     for key, rows in data_per_tanggal.items():
-        if len(rows) > 1: # KALAU 1 HARI ADA LEBIH DARI 1
+        if len(rows) > 1:
             for row_num, row_data in rows:
                 jam = row_data[1].split(" ")[1]
-                if jam in ["23:59:00", "00:00:00"]: # HAPUS YG AUTO
+                if jam in ["23:59:00", "00:00:00"]:
                     rows_to_delete.append(row_num)
-                    break # CUKUP HAPUS 1
+                    break
 
     for row_num in sorted(rows_to_delete, reverse=True):
         try:
@@ -96,7 +96,7 @@ def hapus_semua_auto_double(): # HAPUS SEMUA 00:00 DAN 23:59 YG DOBEL
     if rows_to_delete:
         st.cache_data.clear()
 
-def sort_by_tanggal():
+def sort_by_tanggal(): # UDAH GA PAKE CLEAR LAGI
     all_data = load_absen_data()
     if len(all_data) < 2: return
     header = all_data[0]
@@ -105,14 +105,21 @@ def sort_by_tanggal():
         data.sort(key=lambda x: datetime.strptime(x[1], '%d/%m/%Y %H:%M:%S'), reverse=True)
     except:
         pass
+
+    # HAPUS DATA LAMA DARI BARIS 2 SAMPAI AKHIR
     try:
-        ws_absen.clear()
-        time.sleep(1)
-        ws_absen.update('A1', [header])
+        if len(all_data) > 1:
+            ws_absen.delete_rows(2, len(all_data))
+            time.sleep(0.5)
+    except:
+        pass
+
+    # TULIS ULANG DATA YG UDAH DISORTIR
+    try:
         if data:
             ws_absen.update('A2', data, value_input_option='USER_ENTERED')
     except:
-        pass
+        st.error("Gagal sort. Data aman, coba refresh")
     st.cache_data.clear()
 
 def bulat_masuk(dt_obj):
@@ -210,15 +217,14 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX: CEK BERDASARKAN TGL BUKAN JAM
+def auto_absen_23_59():
     try:
-        hapus_semua_auto_double() # BERSIHIN DULU
+        hapus_semua_auto_double()
         all_data = load_absen_data()
         karyawan_ids = list(db_dict.keys())
         hari_ini = datetime.now()
         dict_libur = get_libur_nasional(hari_ini.year)
 
-        # SIMPAN TGL YG UDAH ADA DATA BENERAN
         tgl_sudah_ada = set()
         for row in all_data[1:]:
             if row[0] and row[1]:
@@ -226,7 +232,7 @@ def auto_absen_23_59(): # FIX: CEK BERDASARKAN TGL BUKAN JAM
                     id_kar = str(row[0]).strip().zfill(8)
                     tgl = datetime.strptime(row[1], '%d/%m/%Y %H:%M:%S').strftime('%d/%m/%Y')
                     jam = row[1].split(" ")[1]
-                    if jam not in ["23:59:00", "00:00:00"]: # HANYA DATA BENERAN
+                    if jam not in ["23:59:00", "00:00:00"]:
                         tgl_sudah_ada.add(f"{id_kar}_{tgl}")
                 except:
                     pass
@@ -248,9 +254,7 @@ def auto_absen_23_59(): # FIX: CEK BERDASARKAN TGL BUKAN JAM
 
             for id_kar in karyawan_ids:
                 key_tgl = f"{id_kar}_{tgl_str}"
-
-                if key_tgl in tgl_sudah_ada: # KALAU UDAH ADA DATA BENERAN, SKIP
-                    continue
+                if key_tgl in tgl_sudah_ada: continue
 
                 if is_tgl_merah:
                     keterangan = f"LIBUR NASIONAL: {nama_libur}"
@@ -270,7 +274,7 @@ def auto_absen_23_59(): # FIX: CEK BERDASARKAN TGL BUKAN JAM
 
         sort_by_tanggal()
     except Exception as e:
-        st.warning(f"Auto absen skip: {e}")
+        st.error(f"Auto absen gagal: {e}")
 
 auto_absen_23_59()
 
