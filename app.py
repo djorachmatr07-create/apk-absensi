@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V2.5")
+st.title("📍 APK ABSENSI KARYAWAN V2.6")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -61,7 +61,7 @@ def get_shift_info(masuk_dt):
         if jam >= 23: efektif_pulang += timedelta(days=1)
         return "SHIFT 3", efektif_pulang
 
-def hitung_lembur_normal(lembur_jam): # DIPAKE BUAT SENIN-JUMAT & SABTU
+def hitung_lembur_normal(lembur_jam):
     if lembur_jam <= 0: return 0.0
     jam_pertama = min(1.0, lembur_jam)
     sisa = lembur_jam - jam_pertama
@@ -109,7 +109,7 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
         jam_kerja_final = min(jam_kerja_float, jam_efektif_sabtu)
         if jam_kerja_float > jam_efektif_sabtu:
             lembur_jam = jam_kerja_float - jam_efektif_sabtu
-            lembur_x = hitung_lembur_normal(lembur_jam) # PAKE FUNGSI SAMA
+            lembur_x = hitung_lembur_normal(lembur_jam)
     else: # SENIN-JUMAT + TUKAR HARI
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
         if pulang_bulet > batas_lembur:
@@ -156,6 +156,22 @@ def auto_alpa_libur():
     if new_rows:
         ws_absen.insert_rows(new_rows, 2)
         load_data.clear()
+
+def rekalkulasi_semua():
+    libur_dict = get_libur(datetime.now().year)
+    progress = st.progress(0)
+    total = len(absen_df)
+    for i, row in absen_df.iterrows():
+        if pd.notna(row['JAM MASUK DT']) and row['KETERANGAN'] not in ['ALPA', 'LIBUR']:
+            try:
+                masuk_dt = pd.to_datetime(row['JAM MASUK'])
+                pulang_dt = pd.to_datetime(row['JAM PULANG'])
+                jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, "NORMAL", libur_dict)
+                row_num = i + 2
+                ws_absen.update(f'E{row_num}:H{row_num}', [[jam_kerja, jam_lembur, shift, ket]])
+            except: pass
+        progress.progress((i + 1) / total)
+    load_data.clear()
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN"])
 
@@ -213,9 +229,16 @@ with menu[1]:
             else: st.warning("Belum ada data absen untuk ID ini")
 
 with menu[2]:
-    if st.button("⛪ JALANKAN AUTO ALPA/LIBUR"):
+    if st.button("🔄 REKALKULASI SEMUA DATA", use_container_width=True, type="primary"):
+        with st.spinner("Sedang menghitung ulang semua data... harap tunggu"):
+            rekalkulasi_semua()
+        st.success("✅ Selesai! Semua data udah keupdate sesuai rumus baru")
+        st.rerun()
+
+    if st.button("⛪ JALANKAN AUTO ALPA/LIBUR", use_container_width=True):
         auto_alpa_libur()
         st.success("✅ Selesai cek 7 hari kebelakang")
+
     if not absen_df.empty:
         st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=True), use_container_width=True)
     else:
