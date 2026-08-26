@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.9")
+st.title("📍 APK ABSENSI KARYAWAN V4.0")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -52,7 +52,7 @@ def load_data():
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         if 'STATUS' not in absen.columns:
             absen['STATUS'] = 'H'
-    else: # KALAU KOSONG BUATIN KOLOM DULU BIAR GA ERROR
+    else:
         absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN", "STATUS", "JAM MASUK DT"])
     return db, absen
 
@@ -120,7 +120,13 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
     elif is_minggu: keterangan = "LIBUR MINGGU"
     elif is_sabtu: keterangan = "SABTU"
 
-    shift, jam_efektif_pulang = get_shift_info(masuk_dt, is_sabtu)
+    # FIX UTAMA: KALAU GH DI SABTU ANGGAP HARI KERJA BIASA
+    if is_tukar_hari_biasa and is_sabtu:
+        efektif_is_sabtu = False
+    else:
+        efektif_is_sabtu = is_sabtu
+
+    shift, jam_efektif_pulang = get_shift_info(masuk_dt, efektif_is_sabtu)
     lembur_x = 0.0
     jam_kerja_float = total_jam_mentah - (1.0 if total_jam_mentah >= 8 else 0.0)
     if jam_kerja_float < 0: jam_kerja_float = 0
@@ -133,19 +139,19 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
         if pulang_bulet > batas_lembur:
             lembur_tambahan = (pulang_bulet - batas_lembur).total_seconds() / 3600
             lembur_x += lembur_tambahan * 2.0
-    elif is_sabtu:
+    elif efektif_is_sabtu: # SABTU NORMAL
         jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    elif is_tukar_hari_sabtu:
+    elif is_tukar_hari_sabtu: # GHS
         jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    else:
+    else: # SENIN-JUMAT + GH
         jam_efektif = 7.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
@@ -162,7 +168,6 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=Fal
     jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status, kosongin_jam)
     row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
 
-    # CEK DULU APAKAH SUDAH ADA DATA
     if not absen_df.empty:
         existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['JAM MASUK DT'].dt.strftime('%d/%m/%Y') == tgl_str)]
     else:
@@ -176,7 +181,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=Fal
     load_data.clear()
 
 def cek_libur_alpa():
-    if absen_df.empty: # VALIDASI KALAU MASIH KOSONG
+    if absen_df.empty:
         sudah_absen = pd.DataFrame(columns=['ID KARYAWAN', 'TGL'])
     else:
         sudah_absen = absen_df[['ID KARYAWAN', 'JAM MASUK DT']].copy()
