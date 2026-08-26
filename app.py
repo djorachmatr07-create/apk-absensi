@@ -1,6 +1,7 @@
 import streamlit as st
 import gspread
 import requests
+import time
 from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
@@ -34,7 +35,6 @@ def get_libur_nasional(tahun):
         dict_libur = {item['holiday_date']: item['holiday_name'] for item in data}
         return dict_libur
     except:
-        st.warning("Gagal ambil data libur nasional. Cek internet")
         return {}
 
 @st.cache_data(ttl=300)
@@ -50,12 +50,16 @@ def load_db():
 
 db_dict = load_db()
 
+@st.cache_data(ttl=60) # KASIH CACHE 1 MENIT BIAR GA SPAM API
+def load_absen_data():
+    return ws_absen.get_all_values()
+
 headers = ["ID KARYAWAN", "JAM MASUK", "JAM PULANG", "NAMA KARYAWAN", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"]
 if ws_absen.row_values(1)!= headers:
     ws_absen.update('A1:H1', [headers])
 
 def sort_by_tanggal():
-    all_data = ws_absen.get_all_values()
+    all_data = load_absen_data()
     header = all_data[0]
     data = [row for row in all_data[1:] if row[0]!= '']
     try:
@@ -63,9 +67,11 @@ def sort_by_tanggal():
     except:
         pass
     ws_absen.clear()
+    time.sleep(0.5)
     ws_absen.update('A1', [header])
     if data:
         ws_absen.update('A2', data, value_input_option='USER_ENTERED')
+    st.cache_data.clear() # HAPUS CACHE BIAR REFRESH
 
 def bulat_masuk(dt_obj):
     if dt_obj.minute > 0 or dt_obj.second > 0:
@@ -94,7 +100,6 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
     tanggal_api_format = masuk.strftime('%Y-%m-%d'); weekday = masuk.weekday()
     nama_libur = dict_libur.get(tanggal_api_format, "")
 
-    # ATURAN BARU: JAM KERJA TETEP DIHITUNG AKTUAL
     potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
     jam_kerja_float = total_jam_mentah - potong_istirahat
     if jam_kerja_float < 0: jam_kerja_float = 0
@@ -122,10 +127,10 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
             lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
             return f"{int(jam_kerja_float)}:00:00", lembur_multiplier, tentukan_shift(masuk_bulat, pulang_bulat), "LEMBUR MINGGU"
 
-    if is_libur: # KALAU LIBUR, SEMUA MASUK LEMBUR X2
+    if is_libur:
         lembur_jam = jam_kerja_float
         lembur_multiplier = hitung_lembur_multiplier(lembur_jam, 2.0)
-    elif weekday == 5 and status_hari == "NORMAL": # SABTU
+    elif weekday == 5 and status_hari == "NORMAL":
         if total_jam_mentah >= 8.0: keterangan = "SABTU FULL DAY"
         jam_efektif = 5.0
         lembur_jam = jam_kerja_float - jam_efektif
@@ -134,7 +139,7 @@ def hitung_jam(masuk_str, pulang_str, dict_libur, status_hari, is_edit=False):
         if lembur_jam > 0:
             jam_pertama = 1.0 if lembur_jam >= 1 else lembur_jam; sisa = lembur_jam - jam_pertama
             lembur_efektif = (jam_pertama * 1.5) + (sisa * 2.0); lembur_multiplier = f"{lembur_efektif:.2f}"
-    else: # HARI KERJA BIASA
+    else:
         jam_efektif = 7.0; lembur_jam = jam_kerja_float - jam_efektif
         if lembur_jam < 0: lembur_jam = 0
         jam_kerja_float = jam_efektif if jam_kerja_float >= jam_efektif else jam_kerja_float
@@ -159,8 +164,8 @@ def cari_data_belum_pulang(id_kar, all_data):
         if str(row[0]).strip().zfill(8) == id_kar and row[2] == "": return i + 1
     return None
 
-def auto_absen_23_59(): # FIX ANTI DOUBLE
-    all_data = ws_absen.get_all_values()
+def auto_absen_23_59():
+    all_data = load_absen_data() # PAKE CACHE
     karyawan_ids = list(db_dict.keys())
     hari_ini = datetime.now()
     dict_libur = get_libur_nasional(hari_ini.year)
@@ -170,6 +175,7 @@ def auto_absen_23_59(): # FIX ANTI DOUBLE
             key = f"{str(row[0]).strip().zfill(8)}_{row[1]}"
             data_exist.add(key)
 
+    batch_rows = []
     for i in range(1, 15):
         tgl_cek = hari_ini - timedelta(days=i)
         tgl_str = tgl_cek.strftime('%d/%m/%Y')
@@ -203,9 +209,14 @@ def auto_absen_23_59(): # FIX ANTI DOUBLE
                 keterangan = "ALPA"
                 shift = "ALPA"
             else: continue
-            row_baru = [id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan]
-            ws_absen.insert_row(row_baru, 2, value_input_option='USER_ENTERED')
-    sort_by_tanggal(); st.cache_data.clear()
+            batch_rows.append([id_kar, jam_23_59, jam_23_59, db_dict[id_kar], "0:00:00", "0.00", shift, keterangan])
+
+    if batch_rows:
+        for row in batch_rows:
+            ws_absen.insert_row(row, 2, value_input_option='USER_ENTERED')
+            time.sleep(0.1) # JEDA BIAR GA KENA LIMIT
+
+    sort_by_tanggal()
 
 auto_absen_23_59()
 
@@ -225,7 +236,7 @@ with menu[1]:
         st.markdown("---")
         id_edit = st.text_input("Masukkan ID Karyawan yg mau diedit", key="id_edit").strip().zfill(8)
         if id_edit:
-            all_data = ws_absen.get_all_values()
+            all_data = load_absen_data() # PAKE CACHE
             data_karyawan = [row for row in all_data[1:] if str(row[0]).strip().zfill(8) == id_edit]
             if data_karyawan:
                 opsi_data = [f"{row[1]} s/d {row[2]} - {row[7]}" for row in data_karyawan[:10]]
@@ -276,7 +287,7 @@ with menu[0]:
     dict_libur = get_libur_nasional(waktu_absen.year)
 
     col1, col2, col3, col4 = st.columns(4)
-    all_data = ws_absen.get_all_values()
+    all_data = load_absen_data() # PAKE CACHE
     tanggal_hari_ini = waktu_absen.strftime('%d/%m/%Y')
 
     with col1:
@@ -325,7 +336,7 @@ with menu[0]:
                         cell_list.append(gspread.Cell(row_index, 8, ket))
                         hitung += 1
                 if cell_list:
-                    ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED')
+                    ws_absen.update_cells(cell_list, value_input_option='USER_ENTERED') # BATCH UPDATE
                     sort_by_tanggal()
                     st.success(f"✅ {hitung} data berhasil dihitung ulang sesuai kalender")
                     st.cache_data.clear()
