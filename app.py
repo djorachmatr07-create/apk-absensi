@@ -6,11 +6,10 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V1.0")
+st.title("📍 APK ABSENSI KARYAWAN V1.2")
 
 PASSWORD_ADMIN = "admin123"
 
-# 1. KONEKSI GSHEET
 @st.cache_resource
 def connect_gsheet():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -19,28 +18,28 @@ def connect_gsheet():
     sh = client.open("REKAP")
     ws_absen = sh.worksheet("REKAP ABSENSI")
     ws_db = sh.worksheet("DATABASE KARYAWAN")
-    # Format kolom
     ws_db.format('A:A', {'numberFormat': {'type': 'TEXT'}})
     ws_absen.format('A:A', {'numberFormat': {'type': 'TEXT'}})
-    ws_absen.format('B:C', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}})
+    ws_absen.format('C:D', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'dd/mm/yyyy hh:mm:ss'}}) # C D untuk jam
     return ws_absen, ws_db
 
 ws_absen, ws_db = connect_gsheet()
 
-# 2. LOAD DATA
 @st.cache_data(ttl=60)
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
+
     absen = pd.DataFrame(ws_absen.get_all_records())
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
+    else: # URUTAN BARU SESUAI SHEET KAMU
+        absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN"])
     return db, absen
 
 db_df, absen_df = load_data()
 st.success(f"✅ Konek. Karyawan: {len(db_df)} | Data Absen: {len(absen_df)}")
 
-# 3. FUNGSI LIBUR NASIONAL
 @st.cache_data(ttl=86400)
 def get_libur(tahun):
     try:
@@ -48,7 +47,6 @@ def get_libur(tahun):
         return {i['holiday_date']: i['holiday_name'] for i in res.json()}
     except: return {}
 
-# 4. FUNGSI HITUNG JAM
 def hitung(masuk_str, pulang_str, status, libur_dict):
     if not masuk_str or not pulang_str: return "0:00:00", "0.00", "", ""
     masuk = datetime.strptime(masuk_str, '%d/%m/%Y %H:%M:%S')
@@ -75,7 +73,6 @@ def hitung(masuk_str, pulang_str, status, libur_dict):
 
     lembur_x = lembur * 2.0 if is_libur else (1.5 if lembur <= 1 else 1.5 + (lembur-1)*2.0)
 
-    # SHIFT
     jam_masuk = masuk.hour
     jam_pulang = pulang.hour
     if 7 <= jam_masuk < 8 and jam_kerja >= 10: shift = "LONG SHIFT1"
@@ -85,29 +82,30 @@ def hitung(masuk_str, pulang_str, status, libur_dict):
 
     return f"{int(jam_kerja)}:00:00", f"{lembur_x:.2f}", shift, keterangan
 
-# 5. FUNGSI CEK DAN UPDATE
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama):
     id_kar = id_kar.zfill(8)
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
+    libur_dict = get_libur(masuk_dt.year)
 
-    # CARI APAKAH UDAH ADA DATA DI TGL ITU
-    existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (pd.to_datetime(absen_df['JAM MASUK']).dt.strftime('%d/%m/%Y') == tgl_str)]
+    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), "NORMAL", libur_dict)
 
-    row_data = [id_kar, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), nama, "", "0.00", "", ""]
+    # URUTAN SESUAI SHEET: ID, NAMA, MASUK, PULANG, KERJA, LEMBUR, SHIFT, KETERANGAN
+    row_data = [id_kar, nama, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), jam_kerja, jam_lembur, shift, ket]
+
+    existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (pd.to_datetime(absen_df['JAM MASUK'], errors='coerce').dt.strftime('%d/%m/%Y') == tgl_str)]
 
     if not existing.empty: # UPDATE
         row_num = existing.index[0] + 2
         ws_absen.update(f'A{row_num}:H{row_num}', [row_data])
-    else: # INSERT DI ATAS
+    else: # INSERT
         ws_absen.insert_row(row_data, 2)
 
-    load_data.clear() # REFRESH CACHE
+    load_data.clear()
 
-# 6. FUNGSI AUTO ALPA/LIBUR
 def auto_alpa_libur():
     libur_dict = get_libur(datetime.now().year)
     new_rows = []
-    for i in range(1, 8): # 7 hari kebelakang aja biar ringan
+    for i in range(1, 8):
         tgl = datetime.now() - timedelta(days=i)
         tgl_str = tgl.strftime('%d/%m/%Y')
         tgl_api = tgl.strftime('%Y-%m-%d')
@@ -119,18 +117,16 @@ def auto_alpa_libur():
         for _, kar in db_df.iterrows():
             id_kar = kar['ID KARYAWAN']
             nama = kar['NAMA KARYAWAN']
-            # Cek udah ada belum
-            if absen_df[(absen_df['ID KARYAWAN']==id_kar) & (pd.to_datetime(absen_df['JAM MASUK']).dt.strftime('%d/%m/%Y')==tgl_str)].empty:
-                new_rows.append([id_kar, f"{tgl_str} {jam_auto}", f"{tgl_str} {jam_auto}", nama, "0:00:00", "0.00", shift, ket])
+            if absen_df[(absen_df['ID KARYAWAN']==id_kar) & (pd.to_datetime(absen_df['JAM MASUK'], errors='coerce').dt.strftime('%d/%m/%Y')==tgl_str)].empty:
+                # URUTAN SESUAI SHEET
+                new_rows.append([id_kar, nama, f"{tgl_str} {jam_auto}", f"{tgl_str} {jam_auto}", "0:00:00", "0.00", shift, ket])
 
     if new_rows:
         ws_absen.insert_rows(new_rows, 2)
         load_data.clear()
 
-# TAMPILAN
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN"])
 
-# TAB ABSEN
 with menu[0]:
     id_in = st.text_input("Masukkan ID Karyawan").strip().zfill(8)
     nama = db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
@@ -152,7 +148,6 @@ with menu[0]:
             st.rerun()
         else: st.error("ID tidak ditemukan")
 
-# TAB EDIT
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
     if not st.session_state.login:
@@ -180,10 +175,14 @@ with menu[1]:
                     upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'])
                     st.success("✅ Edit berhasil")
                     st.rerun()
+            else: st.warning("Belum ada data absen untuk ID ini")
 
-# TAB ADMIN
 with menu[2]:
     if st.button("⛪ JALANKAN AUTO ALPA/LIBUR"):
         auto_alpa_libur()
         st.success("✅ Selesai cek 7 hari kebelakang")
-    st.dataframe(absen_df.sort_values('JAM MASUK', ascending=False), use_container_width=True)
+
+    if not absen_df.empty:
+        st.dataframe(absen_df.sort_values('JAM MASUK', ascending=False), use_container_width=True)
+    else:
+        st.info("Belum ada data absen")
