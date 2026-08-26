@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.1")
+st.title("📍 APK ABSENSI KARYAWAN V3.2")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -18,7 +18,7 @@ MASTER_KODE = {
     "C": {"nama": "CUTI", "gaji": "100%", "jam": "0 jam. Jatah 12 hari/tahun"},
     "L": {"nama": "LIBUR", "gaji": "100%", "jam": "0 jam"},
     "GH": {"nama": "GANTI HARI BIASA", "gaji": "100%", "jam": "Efektif 7 jam"},
-    "GHS": {"nama": "GANTI HARI SABTU", "gaji": "100%", "jam": "Efektif 5 jam"}, # KODE BARU
+    "GHS": {"nama": "GANTI HARI SABTU", "gaji": "100%", "jam": "Efektif 5 jam"},
     "OT": {"nama": "LEMBUR", "gaji": "1.5x - 2x", "jam": "Tambah jam lembur"},
     "TL": {"nama": "TERLAMBAT", "gaji": "100%", "jam": "Jam kerja - jam telat"},
     "PC": {"nama": "PULANG CEPAT", "gaji": "100%", "jam": "Jam kerja - jam PC"},
@@ -42,7 +42,7 @@ def connect_gsheet():
 
 ws_absen, ws_db = connect_gsheet()
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5) # CACHE DIKECILIN JADI 5 DETIK
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
@@ -69,11 +69,11 @@ def buletin_jam(dt):
 
 def get_shift_info(masuk_dt, is_sabtu=False):
     jam = masuk_dt.hour
-    if is_sabtu: # JAM SHIFT SABTU
+    if is_sabtu:
         if 7 <= jam < 12: return "SHIFT 1 SABTU", masuk_dt.replace(hour=12, minute=0, second=0)
         elif 12 <= jam < 17: return "SHIFT 2 SABTU", masuk_dt.replace(hour=17, minute=0, second=0)
         else: return "SHIFT 3 SABTU", masuk_dt.replace(hour=23, minute=0, second=0)
-    else: # JAM SHIFT HARI BIASA
+    else:
         if 7 <= jam < 15: return "SHIFT 1", masuk_dt.replace(hour=15, minute=0, second=0)
         elif 15 <= jam < 23: return "SHIFT 2", masuk_dt.replace(hour=23, minute=0, second=0)
         else:
@@ -104,12 +104,12 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
     is_minggu = weekday == 6
     is_sabtu = weekday == 5
     is_tukar_hari_biasa = status == "GH"
-    is_tukar_hari_sabtu = status == "GHS" # FLAG BARU
+    is_tukar_hari_sabtu = status == "GHS"
     is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari_biasa and not is_tukar_hari_sabtu
 
     keterangan = "HARI KERJA"
     if is_tukar_hari_biasa: keterangan = "GANTI HARI BIASA"
-    elif is_tukar_hari_sabtu: keterangan = "GANTI HARI SABTU" # KET BARU
+    elif is_tukar_hari_sabtu: keterangan = "GANTI HARI SABTU"
     elif is_tgl_merah: keterangan = f"LIBUR NASIONAL: {libur_dict[tgl]}"
     elif is_minggu: keterangan = "LIBUR MINGGU"
     elif is_sabtu: keterangan = "SABTU"
@@ -120,21 +120,21 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
     if jam_kerja_float < 0: jam_kerja_float = 0
     jam_kerja_final = jam_kerja_float
 
-    if is_libur: # MINGGU / TGL MERAH
+    if is_libur:
         jam_kerja_final = min(jam_kerja_float, 7.0)
         lembur_x = jam_kerja_final * 2.0
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
         if pulang_bulet > batas_lembur:
             lembur_tambahan = (pulang_bulet - batas_lembur).total_seconds() / 3600
             lembur_x += lembur_tambahan * 2.0
-    elif is_sabtu: # SABTU ASLI
+    elif is_sabtu:
         jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
             lembur_x = hitung_lembur_normal(lembur_jam)
-    elif is_tukar_hari_sabtu: # GANTI HARI SABTU - INI KUNCINYA
-        jam_efektif = 5.0 # PAKE EFEKTIF 5 JAM
+    elif is_tukar_hari_sabtu: # GANTI HARI SABTU
+        jam_efektif = 5.0
         jam_kerja_final = min(jam_kerja_float, jam_efektif)
         if jam_kerja_float > jam_efektif:
             lembur_jam = jam_kerja_float - jam_efektif
@@ -162,7 +162,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
         ws_absen.update(f'A{row_num}:H{row_num}', [row_data])
     else:
         ws_absen.insert_row(row_data, 2)
-    load_data.clear()
+    load_data.clear() # PAKSA HAPUS CACHE SETELAH SIMPAN
 
 def rekalkulasi_semua():
     libur_dict = get_libur(datetime.now().year)
@@ -237,10 +237,17 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    if st.button("🔄 REKALKULASI SEMUA DATA", use_container_width=True, type="primary"):
-        with st.spinner("Sedang menghitung ulang..."):
-            rekalkulasi_semua()
-        st.success("✅ Selesai! Semua data keupdate")
-        st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 REKALKULASI SEMUA DATA", use_container_width=True, type="primary"):
+            with st.spinner("Sedang menghitung ulang..."):
+                rekalkulasi_semua()
+            st.success("✅ Selesai! Semua data keupdate")
+            st.rerun()
+    with col2:
+        if st.button("🗑️ HAPUS CACHE & REFRESH", use_container_width=True): # TOMBOL BARU
+            load_data.clear()
+            st.rerun()
+
     if not absen_df.empty:
         st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=True), use_container_width=True)
