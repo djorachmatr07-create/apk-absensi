@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V2.0")
+st.title("📍 APK ABSENSI KARYAWAN V2.3")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -46,6 +46,9 @@ def get_libur(tahun):
         return {i['holiday_date']: i['holiday_name'] for i in res.json()}
     except: return {}
 
+def buletin_jam(dt):
+    return dt.replace(minute=0, second=0)
+
 def get_shift_info(masuk_dt):
     jam = masuk_dt.hour
     if 7 <= jam < 15: # SHIFT 1: 07-15
@@ -66,7 +69,9 @@ def hitung_lembur_normal(lembur_jam):
 def hitung(masuk_dt, pulang_dt, status, libur_dict):
     if not masuk_dt or not pulang_dt: return "0:00:00", "0.00", "", ""
 
-    total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
+    pulang_bulet = buletin_jam(pulang_dt)
+
+    total_jam_mentah = (pulang_bulet - masuk_dt).total_seconds() / 3600
     potong_istirahat = 1.0 if total_jam_mentah >= 8 else 0.0
     jam_kerja_float = total_jam_mentah - potong_istirahat
     if jam_kerja_float < 0: jam_kerja_float = 0
@@ -76,10 +81,11 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
     is_tgl_merah = tgl in libur_dict
     is_minggu = weekday == 6
     is_sabtu = weekday == 5
-    is_libur = status in ["LIBUR", "TUKAR HARI"] or is_tgl_merah or is_minggu
+    is_tukar_hari = status == "TUKAR HARI"
+    is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari
 
     keterangan = "HARI KERJA"
-    if status == "TUKAR HARI": keterangan = "TUKAR HARI"
+    if is_tukar_hari: keterangan = "TUKAR HARI"
     elif status == "LIBUR": keterangan = "LIBUR"
     elif is_tgl_merah: keterangan = f"LIBUR NASIONAL: {libur_dict[tgl]}"
     elif is_minggu: keterangan = "LIBUR MINGGU"
@@ -87,28 +93,34 @@ def hitung(masuk_dt, pulang_dt, status, libur_dict):
 
     shift, jam_efektif_pulang = get_shift_info(masuk_dt)
     lembur_x = 0.0
+    jam_kerja_final = jam_kerja_float
 
-    # ATURAN UTAMA LEMBUR
-    if is_libur: # MINGGU / TGL MERAH
-        lembur_x = jam_kerja_float * 2.0 # LANGSUNG X2 SEMUA
-        jam_kerja_float = 0
-    elif is_sabtu: # SABTU
-        jam_kerja_float = min(jam_kerja_float, 5.0)
-        if total_jam_mentah > 6: # 5 kerja + 1 istirahat
-            lembur_jam = total_jam_mentah - 6
-            lembur_x = lembur_jam * 1.5 # SABTU X1.5 SEMUA
-    else: # SENIN-JUMAT
+    # LOGIKA UTAMA
+    if is_libur: # MINGGU / TGL MERAH BUKAN TUKAR HARI
+        jam_kerja_final = min(jam_kerja_float, 7.0) # TETEP 7 JAM
+        lembur_x = jam_kerja_final * 2.0 # LEMBUR = JAM KERJA X2
+        # Kalau ada lembur tambahan > jam efektif + 60mnt, tambahin juga x2
         batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
-        if pulang_dt > batas_lembur:
-            lembur_jam = (pulang_dt - batas_lembur).total_seconds() / 3600
-            lembur_x = hitung_lembur_normal(lembur_jam) # JAM 1 X1.5, DST X2
-        jam_kerja_float = min(jam_kerja_float, 7.0) # di cap 7 jam
+        if pulang_bulet > batas_lembur:
+            lembur_tambahan = (pulang_bulet - batas_lembur).total_seconds() / 3600
+            lembur_x += lembur_tambahan * 2.0
+    elif is_sabtu: # SABTU
+        jam_kerja_final = min(jam_kerja_float, 5.0)
+        if total_jam_mentah > 6:
+            lembur_jam = total_jam_mentah - 6
+            lembur_x = lembur_jam * 1.5
+    else: # SENIN-JUMAT + TUKAR HARI
+        batas_lembur = jam_efektif_pulang + timedelta(minutes=60)
+        if pulang_bulet > batas_lembur:
+            lembur_jam = (pulang_bulet - batas_lembur).total_seconds() / 3600
+            lembur_x = hitung_lembur_normal(lembur_jam)
+        jam_kerja_final = min(jam_kerja_float, 7.0)
 
     # CEK LONG SHIFT
     if total_jam_mentah >= 10:
         shift = shift.replace("SHIFT", "LONG SHIFT")
 
-    return f"{int(jam_kerja_float)}:00:00", f"{lembur_x:.2f}", shift, keterangan
+    return f"{int(jam_kerja_final)}:00:00", f"{lembur_x:.2f}", shift, keterangan
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama):
     id_kar = id_kar.zfill(8)
