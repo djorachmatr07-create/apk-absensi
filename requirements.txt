@@ -1,4 +1,6 @@
-streamlit
-gspread
-google-auth
-requests
+    icalendar
+    requests
+    gspread
+    pandas
+    google-auth
+    google-auth-oauthlib
