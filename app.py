@@ -1,11 +1,11 @@
 import streamlit as st
 import gspread
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V5.0")
+st.title("📍 APK ABSENSI KARYAWAN V5.1")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -39,13 +39,13 @@ def load_data():
 db_df, absen_df = load_data()
 st.success(f"✅ Konek. Karyawan: {len(db_df)} | Data Absen: {len(absen_df)}")
 
-# HARDCODE LIBUR + CUTI BERSAMA 2026 LENGKAP
+# LIBUR NASIONAL 2026 FIX SESUAI SKB + KALENDER KAMU
 LIBUR_NASIONAL = {
     "2026-01-01": "Tahun Baru 2026",
     "2026-01-29": "Tahun Baru Imlek 2577 Kongzili",
     "2026-02-14": "Isra Mikraj Nabi Muhammad SAW",
     "2026-03-19": "Hari Suci Nyepi Tahun Baru Saka 1948",
-    "2026-03-20": "Cuti Bersama Hari Suci Nyepi", # INI YG KEMARIN KELEWAT
+    "2026-03-20": "Cuti Bersama Hari Suci Nyepi",
     "2026-03-29": "Wafat Isa Al Masih",
     "2026-03-30": "Cuti Bersama Wafat Isa Al Masih",
     "2026-04-21": "Hari Raya Idul Fitri 1447 H",
@@ -60,8 +60,9 @@ LIBUR_NASIONAL = {
     "2026-06-17": "Hari Raya Idul Adha 1447 H",
     "2026-06-18": "Cuti Bersama Hari Raya Idul Adha",
     "2026-06-27": "1 Muharram 1448 H - Tahun Baru Islam",
-    "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
-    "2026-08-28": "Maulid Nabi Muhammad SAW",
+    "2026-08-17": "Hari Kemerdekaan Republik Indonesia", # SENIN
+    "2026-08-25": "Maulid Nabi Muhammad SAW", # SELASA - INI YG KEMARIN KELEWAT
+    "2026-08-28": "Cuti Bersama Maulid Nabi Muhammad SAW",
     "2026-12-25": "Hari Raya Natal",
 }
 st.info(f"✅ Data Kalender Nasional Loaded: {len(LIBUR_NASIONAL)} hari libur/cuti")
@@ -70,8 +71,8 @@ def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_k
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
 
-    # RULE 1: KALAU ADA JAM MASUK DAN PULANG = MASUK
-    if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str:
+    # RULE 1: KALAU ADA JAM MASUK DAN PULANG BEDA = MASUK
+    if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0:
         return "MASUK"
 
     # RULE 2: KALAU JAM KERJA 0 BARU CEK KALENDER
@@ -83,7 +84,7 @@ def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_k
         elif weekday == 5:
             return "SABTU"
         else:
-            return "TIDAK MASUK" # Alpa/Izin/Sakit nanti diedit manual
+            return "TIDAK MASUK"
 
     return "HARI KERJA"
 
@@ -125,18 +126,19 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
     load_data.clear()
 
 def update_semua_keterangan():
-    """Update semua data berdasarkan jam masuk dan kalender"""
     if absen_df.empty: return 0
     updates = []
     for i, row in absen_df.iterrows():
         masuk_dt = pd.to_datetime(row['JAM MASUK'])
-        jam_kerja = row['JAM KERJA']
-        jam_kerja_float = 0 if jam_kerja == '0:00:00' else 7 # asal bukan 0
+        jam_kerja_str = row['JAM KERJA']
+        jam_kerja_float = 0 if jam_kerja_str == '0:00:00' else float(jam_kerja_str.split(':')[0])
 
         ket_baru = cek_keterangan_dari_tanggal(masuk_dt, row['JAM MASUK'], row['JAM PULANG'], jam_kerja_float)
 
         status_lama = row.get('STATUS', 'H')
-        shift_baru = status_lama if status_lama in ['A','I','S','C','L'] else 'L' if 'LIBUR' in ket_baru else 'H'
+        if 'LIBUR' in ket_baru: shift_baru = 'L'
+        elif status_lama in ['A','I','S','C']: shift_baru = status_lama
+        else: shift_baru = 'H'
 
         row_num = i + 2
         updates.append({'range': f'G{row_num}:H{row_num}', 'values': [[shift_baru, ket_baru]]})
