@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V4.1")
+st.title("📍 APK ABSENSI KARYAWAN V4.2")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -113,12 +113,11 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
     is_tukar_hari_sabtu = status == "GHS"
     is_libur = (is_tgl_merah or is_minggu) and not is_tukar_hari_biasa and not is_tukar_hari_sabtu
 
-    # LOGIKA KETERANGAN BARU
     if is_tukar_hari_biasa:
         keterangan = "GANTI HARI BIASA"
     elif is_tukar_hari_sabtu:
         keterangan = "GANTI HARI SABTU"
-    elif status == "L": # KALAU MANUAL SET L
+    elif status == "L":
         if is_tgl_merah:
             keterangan = f"LIBUR NASIONAL: {LIBUR_DICT[tgl]}"
         elif is_minggu:
@@ -134,7 +133,6 @@ def hitung(masuk_dt, pulang_dt, status, kosongin_jam=False):
     else:
         keterangan = "HARI KERJA"
 
-    # LOGIKA SHIFT BARU
     if status == "L":
         shift = "L"
     elif is_tukar_hari_biasa and is_sabtu:
@@ -221,7 +219,7 @@ def cek_libur_alpa():
             nama = db_df[db_df['ID KARYAWAN']==id_kar]['NAMA KARYAWAN'].values[0]
             if tgl_str not in sudah_absen[sudah_absen['ID KARYAWAN']==id_kar]['TGL'].values:
                 if is_tgl_merah:
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L") # STATUS L
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
                     count += 1
                 elif is_minggu:
                     upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
@@ -233,6 +231,36 @@ def cek_libur_alpa():
                     upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
                     count += 1
         progress.progress((i + 1) / total_hari)
+    load_data.clear()
+    return count
+
+def update_keterangan_libur(): # FUNGSI BARU
+    if absen_df.empty: return 0
+    progress = st.progress(0)
+    count = 0
+    data_l = absen_df[absen_df['STATUS'] == 'L']
+    total = len(data_l)
+
+    for i, row in data_l.iterrows():
+        try:
+            masuk_dt = pd.to_datetime(row['JAM MASUK'])
+            tgl_str = masuk_dt.strftime('%Y-%m-%d')
+            is_tgl_merah = tgl_str in LIBUR_DICT
+            is_minggu = masuk_dt.weekday() == 6
+
+            if is_tgl_merah:
+                ket_baru = f"LIBUR NASIONAL: {LIBUR_DICT[tgl_str]}"
+            elif is_minggu:
+                ket_baru = "LIBUR MINGGU"
+            else:
+                ket_baru = "LIBUR"
+
+            if row['KETERANGAN']!= ket_baru:
+                row_num = i + 2
+                ws_absen.update(f'G{row_num}:H{row_num}', [['L', ket_baru]])
+                count += 1
+        except: pass
+        progress.progress((i + 1) / total)
     load_data.clear()
     return count
 
@@ -295,14 +323,20 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {MASTER_KODE[kode_pilih]['nama']}")
 
 with menu[2]:
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3) # JADI 3 TOMBOL
     with col1:
-        if st.button("🔍 CEK LIBUR & ALPA OTOMATIS", use_container_width=True, type="primary"):
+        if st.button("🔍 CEK LIBUR & ALPA OTOMATIS", use_container_width=True):
             with st.spinner("Sedang cek 30 hari terakhir..."):
                 jml = cek_libur_alpa()
-            st.success(f"✅ Selesai! {jml} data Libur/Alpa berhasil ditambahkan")
+            st.success(f"✅ Selesai! {jml} data Libur/Alpa ditambahkan")
             st.rerun()
     with col2:
+        if st.button("🔄 UPDATE KETERANGAN LIBUR", use_container_width=True, type="primary"): # TOMBOL BARU
+            with st.spinner("Sedang update semua data L..."):
+                jml = update_keterangan_libur()
+            st.success(f"✅ Selesai! {jml} data L diupdate keterangannya")
+            st.rerun()
+    with col3:
         if st.button("🗑️ REFRESH DATA", use_container_width=True):
             load_data.clear()
             st.rerun()
