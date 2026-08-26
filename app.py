@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V7.5 - SHIFT = STATUS-SHIFT")
+st.title("📍 APK ABSENSI V7.7 - GHS FIX")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -33,11 +33,8 @@ def get_libur_dari_ics():
                 start = component.get('dtstart').dt
                 if hasattr(start, 'strftime'): start = start.strftime('%Y-%m-%d')
                 libur[start] = str(component.get('summary'))
-        st.sidebar.success(f"✅ {len(libur)} Hari Libur Terload")
         return libur
-    except Exception as e: 
-        st.sidebar.error(f"Gagal load ICS: {e}")
-        return {}
+    except: return {}
 
 LIBUR_NASIONAL = get_libur_dari_ics()
 
@@ -64,10 +61,8 @@ def bulatkan_ke_jam_pas(dt):
 def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
-    # 1. KALAU MASUK
     if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0:
         return "MASUK"
-    # 2. KALAU TIDAK KERJA
     if jam_kerja_float == 0:
         if status == 'L' or tgl_str in LIBUR_NASIONAL:
             if tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
@@ -76,29 +71,28 @@ def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_k
         elif status == 'I': return "IZIN"
         elif status == 'S': return "SAKIT"
         elif status == 'C': return "CUTI"
+        elif status == 'TL': return "TUKAR LIBUR"
+        elif status == 'GH': return "GANTI HARI"
+        elif status == 'GHS': return "GANTI HARI SABTU"
         elif weekday == 6: return "LIBUR MINGGU"
         elif weekday == 5: return "SABTU"
         else: return "TIDAK MASUK"
     return "HARI KERJA"
 
 def cek_shift(jam_masuk_dt, jam_kerja_float, keterangan, status):
-    # 1. KALAU TIDAK MASUK / LIBUR
     if 'LIBUR' in keterangan: return 'SL'
-    if status == 'A': return 'A'
-    if status == 'I': return 'I'
-    if status == 'S': return 'S'
-    if status == 'C': return 'C'
+    if status in ['A','I','S','C','TL']: return status
     if jam_kerja_float == 0: return '-'
-    
-    # 2. KALAU MASUK - CEK SHIFT DULU
+
+    # CEK SHIFT DULU
     if jam_kerja_float >= 11.5: shift_code = 'LS'
     else:
         jam = jam_masuk_dt.hour
         if 7 <= jam < 15: shift_code = 'S1'
         elif 15 <= jam < 23: shift_code = 'S2'
         else: shift_code = 'S3'
-    
-    # 3. GABUNGKAN DENGAN STATUS HANYA KALAU MASUK
+
+    # GABUNG STATUS + SHIFT HANYA KALAU MASUK
     if keterangan == "MASUK":
         return f"{status}-{shift_code}"
     else:
@@ -114,6 +108,8 @@ def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
+
+    # POTONG ISTIRAHAT 1 JAM KALAU KERJA >= 8 JAM
     if total_jam_mentah >= 8.0: jam_kerja_float = total_jam_mentah - 1.0
     else: jam_kerja_float = total_jam_mentah
     if jam_kerja_float < 0: jam_kerja_float = 0
@@ -123,7 +119,7 @@ def hitung(masuk_dt, pulang_dt, status):
     keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status)
     shift = cek_shift(masuk_dt, jam_kerja_float, keterangan, status)
     jam_lembur = hitung_lembur(jam_kerja_float)
-        
+
     return f"{jam_kerja_float:.2f}", jam_lembur, shift, keterangan, jam_masuk_str, jam_pulang_str
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
@@ -190,12 +186,17 @@ with menu[1]:
             if not data_kar.empty:
                 pilih = st.selectbox("Pilih Tanggal", data_kar.sort_values('JAM MASUK DT')['JAM MASUK'].tolist())
                 row = data_kar[data_kar['JAM MASUK']==pilih].iloc[0]
-                kode_pilih = st.selectbox("Ubah Status Menjadi", options=["H","A","I","S","C","L"])
+                DAFTAR_STATUS = {
+                    "H": "H - HADIR", "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU",
+                    "TL": "TL - TUKAR LIBUR", "A": "A - ALFA", "I": "I - IZIN",
+                    "S": "S - SAKIT", "C": "C - CUTI", "L": "L - LIBUR"
+                }
+                kode_pilih = st.selectbox("Ubah Status Menjadi", options=list(DAFTAR_STATUS.keys()), format_func=lambda x: DAFTAR_STATUS[x])
                 if st.button("SIMPAN EDIT"):
                     masuk_dt = pd.to_datetime(row['JAM MASUK'])
                     pulang_dt = pd.to_datetime(row['JAM PULANG'])
                     upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih)
-                    st.success(f"✅ Edit berhasil. Status: {kode_pilih}")
+                    st.success(f"✅ Edit berhasil. Status: {DAFTAR_STATUS[kode_pilih]}")
                     st.rerun()
 
 with menu[2]:
@@ -205,6 +206,6 @@ with menu[2]:
             jml = update_semua_keterangan()
             st.success(f"✅ Selesai! {jml} data diupdate")
             st.rerun()
-        
+
 with menu[3]:
     st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=False), use_container_width=True, height=600)
