@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.2 - FINAL ANTI ERROR")
+st.title("📍 APK ABSENSI V9.3 - HAPUS DUPLIKAT KOLOM")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -64,8 +64,17 @@ def load_data():
     all_values = ws_absen.get_all_values()
     if len(all_values) > 1:
         header = all_values[0]
+        # HAPUS DUPLIKAT HEADER
+        seen = set()
+        new_header = []
+        for col in header:
+            if col not in seen:
+                new_header.append(col)
+                seen.add(col)
+            else:
+                new_header.append(f"{col}_DUP") # kasih _DUP biar gak bentrok
         data = all_values[1:]
-        absen = pd.DataFrame(data, columns=header)
+        absen = pd.DataFrame(data, columns=new_header)
     else:
         header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']
         absen = pd.DataFrame(columns=header)
@@ -77,7 +86,6 @@ def load_data():
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
-        # FIX: PAKE LAMBDA AMAN
         absen['LEMBUR 1.5'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[0])
         absen['LEMBUR 2.0'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[1])
     else:
