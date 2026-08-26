@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.3")
+st.title("📍 APK ABSENSI KARYAWAN V3.4")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -42,7 +42,7 @@ def connect_gsheet():
 
 ws_absen, ws_db = connect_gsheet()
 
-@st.cache_data(ttl=300) # BALIKIN KE 5 MENIT BIAR GAK LAMA
+@st.cache_data(ttl=300)
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
@@ -57,14 +57,14 @@ def load_data():
 db_df, absen_df = load_data()
 st.success(f"✅ Konek. Karyawan: {len(db_df)} | Data Absen: {len(absen_df)}")
 
-@st.cache_data(ttl=86400) # LIBUR 1 HARI SEKALI AJA
+@st.cache_data(ttl=86400)
 def get_libur(tahun):
     try:
         res = requests.get(f"https://indonesia-holiday-api.vercel.app/api/{tahun}", timeout=5)
         return {i['holiday_date']: i['holiday_name'] for i in res.json()}
     except: return {}
 
-LIBUR_DICT = get_libur(datetime.now().year) # PANGGIL 1X DI AWAL AJA
+LIBUR_DICT = get_libur(datetime.now().year)
 
 def buletin_jam(dt):
     return dt.replace(minute=0, second=0)
@@ -102,7 +102,7 @@ def hitung(masuk_dt, pulang_dt, status):
 
     tgl = masuk_dt.strftime('%Y-%m-%d')
     weekday = masuk_dt.weekday()
-    is_tgl_merah = tgl in LIBUR_DICT # PAKE YG UDAH DI CACHE
+    is_tgl_merah = tgl in LIBUR_DICT
     is_minggu = weekday == 6
     is_sabtu = weekday == 5
     is_tukar_hari_biasa = status == "GH"
@@ -155,7 +155,7 @@ def hitung(masuk_dt, pulang_dt, status):
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
     id_kar = id_kar.zfill(8)
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
-    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, status) # GAK PAKE LIBUR_DICT LAGI
+    jam_kerja, jam_lembur, shift, ket = hitung(masuk_dt, pulang_dt, status)
     row_data = [id_kar, nama, masuk_dt.strftime('%d/%m/%Y %H:%M:%S'), pulang_dt.strftime('%d/%m/%Y %H:%M:%S'), jam_kerja, jam_lembur, shift, ket]
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['JAM MASUK DT'].dt.strftime('%d/%m/%Y') == tgl_str)]
     if not existing.empty:
@@ -163,9 +163,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
         ws_absen.update(f'A{row_num}:H{row_num}', [row_data])
     else:
         ws_absen.insert_row(row_data, 2)
-    # GAK RERUN, CUMA UPDATE DATAFRAME LOKAL
-    global absen_df
-    load_data.clear()
+    load_data.clear() # CUKUP INI AJA, HAPUS GLOBAL
 
 def rekalkulasi_semua():
     progress = st.progress(0)
@@ -234,7 +232,7 @@ with menu[1]:
                 if st.button("SIMPAN EDIT"):
                     masuk_dt = datetime.combine(new_masuk_tgl, new_masuk_jam)
                     pulang_dt = datetime.combine(new_pulang_tgl, new_pulang_jam)
-                    with st.spinner("Menyimpan 1-3 detik..."): # ADA SPINNER BIAR JELAS
+                    with st.spinner("Menyimpan 1-3 detik..."):
                         upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih)
                     st.success(f"✅ Edit berhasil. Status: {MASTER_KODE[kode_pilih]['nama']}")
 
