@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI + GAJI KARYAWAN V7.3 - BULAT JAM")
+st.title("📍 APK ABSENSI V7.4 - SHIFT FIX")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -31,8 +31,7 @@ def get_libur_dari_ics():
         for component in cal.walk():
             if component.name == "VEVENT":
                 start = component.get('dtstart').dt
-                if hasattr(start, 'strftime'):
-                    start = start.strftime('%Y-%m-%d')
+                if hasattr(start, 'strftime'): start = start.strftime('%Y-%m-%d')
                 libur[start] = str(component.get('summary'))
         return libur
     except: return {}
@@ -56,20 +55,18 @@ def load_data():
 db_df, absen_df = load_data()
 
 def bulatkan_ke_jam_pas(dt):
-    # 06:30 ke atas -> naik 1 jam. 06:29 ke bawah -> turun
-    if dt.minute >= 30:
-        return dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    else:
-        return dt.replace(minute=0, second=0, microsecond=0)
+    if dt.minute >= 30: return dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else: return dt.replace(minute=0, second=0, microsecond=0)
 
 def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
     if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0:
-        if tgl_str in LIBUR_NASIONAL or weekday == 6: return "LEMBUR HARI LIBUR"
-        else: return "MASUK"
+        return "MASUK"
     if jam_kerja_float == 0:
-        if status == 'L' or tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL.get(tgl_str, 'LIBUR')}"
+        if status == 'L' or tgl_str in LIBUR_NASIONAL:
+            if tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
+            else: return "SHIFT LIBUR"
         elif status == 'A': return "ALFA"
         elif status == 'I': return "IZIN"
         elif status == 'S': return "SAKIT"
@@ -79,8 +76,9 @@ def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str, jam_pulang_str, jam_k
         else: return "TIDAK MASUK"
     return "HARI KERJA"
 
-def cek_shift(jam_masuk_dt, jam_kerja_float, keterangan, status):
-    if 'LIBUR' in keterangan: return 'SL'
+def cek_shift(jam_masuk_dt, jam_pulang_dt, jam_kerja_float, keterangan, status):
+    # INI CUMA NGATUR KOLOM SHIFT SAJA
+    if 'LIBUR' in keterangan: return 'SL' # SHIFT LIBUR
     if status == 'A': return 'A'
     if status == 'I': return 'I'
     if status == 'S': return 'S'
@@ -92,38 +90,26 @@ def cek_shift(jam_masuk_dt, jam_kerja_float, keterangan, status):
     elif 15 <= jam < 23: return 'S2'
     else: return 'S3' # 23-07
 
-def hitung_lembur(jam_kerja_float, keterangan):
+def hitung_lembur(jam_kerja_float):
     jam_normal = 8.0
     jam_lembur = 0.0
-    if 'LEMBUR' in keterangan: jam_lembur = jam_kerja_float
-    elif jam_kerja_float > jam_normal: jam_lembur = jam_kerja_float - jam_normal
+    if jam_kerja_float > jam_normal: jam_lembur = jam_kerja_float - jam_normal
     return f"{jam_lembur:.2f}"
 
 def hitung(masuk_dt, pulang_dt, status):
-    # 1. BULATKAN JAM DULU KE JAM PAS
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
-
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
-
-    # 2. POTONG ISTIRAHAT 1 JAM KALAU KERJA >= 8 JAM
     if total_jam_mentah >= 8.0: jam_kerja_float = total_jam_mentah - 1.0
     else: jam_kerja_float = total_jam_mentah
     if jam_kerja_float < 0: jam_kerja_float = 0
 
     jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
-    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status)
-    shift = cek_shift(masuk_dt, jam_kerja_float, keterangan, status)
-    jam_lembur = hitung_lembur(jam_kerja_float, keterangan)
-
-    # 3. KODE GAJI
-    if 'LEMBUR HARI LIBUR' in keterangan: keterangan = 'OTMING'
-    elif float(jam_lembur) > 0: keterangan = 'OTWD'
-    elif shift == 'LS': keterangan = 'LONGSHIFT'
-    elif shift == 'SL': keterangan = 'SHIFT LIBUR'
-    elif shift in ['S1','S2','S3']: keterangan = 'MASUK'
-
+    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status) # KETERANGAN TETAP DARI SINI
+    shift = cek_shift(masuk_dt, pulang_dt, jam_kerja_float, keterangan, status) # SHIFT DIHITUNG TERPISAH
+    jam_lembur = hitung_lembur(jam_kerja_float)
+        
     return f"{jam_kerja_float:.2f}", jam_lembur, shift, keterangan, jam_masuk_str, jam_pulang_str
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H"):
@@ -172,7 +158,7 @@ with menu[0]:
             masuk_dt = datetime.combine(tgl_masuk, jam_masuk)
             pulang_dt = datetime.combine(tgl_pulang, jam_pulang)
             upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H")
-            st.success("✅ Data tersimpan & sudah dibulatkan")
+            st.success("✅ Data tersimpan")
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
@@ -199,7 +185,7 @@ with menu[1]:
 with menu[2]:
     if st.button("🔄 UPDATE SEMUA KETERANGAN DARI KALENDER", type="primary"):
         jml = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml} data diupdate & dibulatkan")
+        st.success(f"✅ Selesai! {jml} data diupdate")
         st.rerun()
 
 with menu[3]:
