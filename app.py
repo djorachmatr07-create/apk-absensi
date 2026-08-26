@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI KARYAWAN V3.8")
+st.title("📍 APK ABSENSI KARYAWAN V3.9")
 
 PASSWORD_ADMIN = "admin123"
 
@@ -52,8 +52,8 @@ def load_data():
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         if 'STATUS' not in absen.columns:
             absen['STATUS'] = 'H'
-    else:
-        absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN", "STATUS"])
+    else: # KALAU KOSONG BUATIN KOLOM DULU BIAR GA ERROR
+        absen = pd.DataFrame(columns=["ID KARYAWAN", "NAMA KARYAWAN", "JAM MASUK", "JAM PULANG", "JAM KERJA", "JAM LEMBUR", "SHIFT", "KETERANGAN", "STATUS", "JAM MASUK DT"])
     return db, absen
 
 db_df, absen_df = load_data()
@@ -161,7 +161,13 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=Fal
     tgl_str = masuk_dt.strftime('%d/%m/%Y')
     jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status, kosongin_jam)
     row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
-    existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['JAM MASUK DT'].dt.strftime('%d/%m/%Y') == tgl_str)]
+
+    # CEK DULU APAKAH SUDAH ADA DATA
+    if not absen_df.empty:
+        existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['JAM MASUK DT'].dt.strftime('%d/%m/%Y') == tgl_str)]
+    else:
+        existing = pd.DataFrame()
+
     if not existing.empty:
         row_num = existing.index[0] + 2
         ws_absen.update(f'A{row_num}:I{row_num}', [row_data])
@@ -169,15 +175,19 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", kosongin_jam=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-def cek_libur_alpa(): # FUNGSI BARU GANTIIN REKALKULASI
+def cek_libur_alpa():
+    if absen_df.empty: # VALIDASI KALAU MASIH KOSONG
+        sudah_absen = pd.DataFrame(columns=['ID KARYAWAN', 'TGL'])
+    else:
+        sudah_absen = absen_df[['ID KARYAWAN', 'JAM MASUK DT']].copy()
+        sudah_absen['TGL'] = sudah_absen['JAM MASUK DT'].dt.strftime('%Y-%m-%d')
+
     progress = st.progress(0)
-    total_hari = 30 # CEK 30 HARI TERAKHIR
+    total_hari = 30
     tgl_mulai = datetime.now() - timedelta(days=total_hari)
     karyawan_list = db_df['ID KARYAWAN'].tolist()
-    sudah_absen = absen_df[['ID KARYAWAN', 'JAM MASUK DT']].copy()
-    sudah_absen['TGL'] = sudah_absen['JAM MASUK DT'].dt.strftime('%Y-%m-%d')
-
     count = 0
+
     for i in range(total_hari):
         tgl_cek = tgl_mulai + timedelta(days=i)
         tgl_str = tgl_cek.strftime('%Y-%m-%d')
@@ -187,20 +197,18 @@ def cek_libur_alpa(): # FUNGSI BARU GANTIIN REKALKULASI
 
         for id_kar in karyawan_list:
             nama = db_df[db_df['ID KARYAWAN']==id_kar]['NAMA KARYAWAN'].values[0]
-            # CEK APAKAH UDAH ABSEN DI TGL INI
             if tgl_str not in sudah_absen[sudah_absen['ID KARYAWAN']==id_kar]['TGL'].values:
-                # KALAU BELUM ABSEN
                 if is_tgl_merah:
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L") # LIBUR NASIONAL
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
                     count += 1
                 elif is_minggu:
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L") # LIBUR MINGGU
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
                     count += 1
-                elif weekday < 5: # SENIN-JUMAT
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "A") # ALPA
+                elif weekday < 5:
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "A")
                     count += 1
-                elif weekday == 5: # SABTU
-                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L") # SABTU DIANGGAP LIBUR
+                elif weekday == 5:
+                    upsert_absen(id_kar, tgl_cek, tgl_cek, nama, "L")
                     count += 1
         progress.progress((i + 1) / total_hari)
     load_data.clear()
@@ -267,7 +275,7 @@ with menu[1]:
 with menu[2]:
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔍 CEK LIBUR & ALPA OTOMATIS", use_container_width=True, type="primary"): # GANTI TOMBOL
+        if st.button("🔍 CEK LIBUR & ALPA OTOMATIS", use_container_width=True, type="primary"):
             with st.spinner("Sedang cek 30 hari terakhir..."):
                 jml = cek_libur_alpa()
             st.success(f"✅ Selesai! {jml} data Libur/Alpa berhasil ditambahkan")
