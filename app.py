@@ -2,12 +2,13 @@ import streamlit as st
 import gspread
 import pandas as pd
 import requests
+import time
 from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.5 - FIX LEMBUR x1.5 x2.0")
+st.title("📍 APK ABSENSI V9.6 - FIX UPDATE LEMBUR")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -40,7 +41,6 @@ def get_libur_dari_ics():
 
 LIBUR_NASIONAL = get_libur_dari_ics()
 
-# FIX RUMUS LEMBUR BARU
 def hitung_lembur_baru(jam_kerja_float):
     try:
         jam_kerja_float = float(jam_kerja_float or 0)
@@ -52,9 +52,9 @@ def hitung_lembur_baru(jam_kerja_float):
     if jam_kerja_float > jam_normal:
         jam_lembur_total = jam_kerja_float - jam_normal
         if jam_lembur_total > 0:
-            lembur_1_5 = min(1.0, jam_lembur_total) # JAM KE-1
+            lembur_1_5 = min(1.0, jam_lembur_total)
             if jam_lembur_total > 1.0:
-                lembur_2_0 = jam_lembur_total - 1.0 # JAM KE-2 DST
+                lembur_2_0 = jam_lembur_total - 1.0
     return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
 
 @st.cache_data(ttl=300)
@@ -80,7 +80,6 @@ def load_data():
         absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
         absen['LEMBUR 1.5'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[0])
         absen['LEMBUR 2.0'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[1])
-        # URUTKAN TANGGAL TERBARU DI ATAS
         absen = absen.sort_values('JAM MASUK DT', ascending=False)
     else:
         absen['JAM MASUK DT'] = pd.to_datetime([])
@@ -133,12 +132,10 @@ def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
-
     if total_jam_mentah >= 8.0:
         jam_kerja_float = total_jam_mentah - 1.0
     else:
         jam_kerja_float = total_jam_mentah
-
     if jam_kerja_float < 0: jam_kerja_float = 0
     jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
@@ -179,8 +176,11 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
+# FIX: UPDATE SEMUA + ADA PROGRESS BAR
 def update_semua_keterangan():
     if absen_df.empty: return 0
+    total = len(absen_df)
+    progress_bar = st.progress(0, text="Mulai update...")
     updates = []
     for i, row in absen_df.iterrows():
         masuk_dt = pd.to_datetime(row['JAM MASUK']) if row['JAM MASUK'] else datetime.now()
@@ -189,7 +189,10 @@ def update_semua_keterangan():
         jam_kerja, jam_lembur, shift, ket, _, _ = hitung(masuk_dt, pulang_dt, status_lama)
         row_num = i + 2
         updates.append({'range': f'E{row_num}:I{row_num}', 'values': [[jam_kerja, jam_lembur, shift, ket, status_lama]]})
+        progress_bar.progress((i + 1) / total, text=f"Update data {i+1}/{total}")
+        time.sleep(0.05) # biar keliatan loadingnya
     ws_absen.batch_update(updates)
+    progress_bar.empty()
     load_data.clear()
     return len(updates)
 
@@ -268,14 +271,10 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("Menu untuk update data lama + hitung ulang lembur")
+    st.warning("Klik tombol ini untuk hitung ulang semua data lama pake rumus lembur baru")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True):
-        with st.spinner("Mohon tunggu..."):
-            jml = update_semua_keterangan()
-            st.success(f"✅ Selesai! {jml} data diupdate. Silahkan refresh sheet")
-            st.rerun()
+        jml = update_semua_keterangan()
+        st.success(f"✅ Selesai! {jml} data diupdate. Refresh Google Sheet kamu")
 
 with menu[3]:
-    # TAMPILKAN DENGAN 2 KOLOM LEMBUR BARU
-    df_tampil = absen_df.copy()
-    st.dataframe(df_tampil, use_container_width=True, height=600)
+    st.dataframe(absen_df, use_container_width=True, height=600)
