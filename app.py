@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.3 - HAPUS DUPLIKAT KOLOM")
+st.title("📍 APK ABSENSI V9.4 FINAL")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -63,23 +63,14 @@ def load_data():
     
     all_values = ws_absen.get_all_values()
     if len(all_values) > 1:
-        header = all_values[0]
-        # HAPUS DUPLIKAT HEADER
-        seen = set()
-        new_header = []
-        for col in header:
-            if col not in seen:
-                new_header.append(col)
-                seen.add(col)
-            else:
-                new_header.append(f"{col}_DUP") # kasih _DUP biar gak bentrok
-        data = all_values[1:]
-        absen = pd.DataFrame(data, columns=new_header)
+        header = all_values[0][:9] # AMBIL 9 KOLOM PERTAMA AJA
+        data = [row[:9] for row in all_values[1:]] # AMBIL 9 KOLOM PERTAMA AJA
+        absen = pd.DataFrame(data, columns=header)
     else:
         header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']
         absen = pd.DataFrame(columns=header)
 
-    for col in ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']:
+    for col in header:
         if col not in absen.columns: absen[col] = ''
 
     if not absen.empty:
@@ -139,8 +130,13 @@ def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
-    if total_jam_mentah >= 8.0: jam_kerja_float = total_jam_mentah - 1.0
-    else: jam_kerja_float = total_jam_mentah
+    
+    # LOGIKA ISTIRAHAT: KURANG DARI 8 JAM GAK POTONG
+    if total_jam_mentah >= 8.0: 
+        jam_kerja_float = total_jam_mentah - 1.0
+    else: 
+        jam_kerja_float = total_jam_mentah
+        
     if jam_kerja_float < 0: jam_kerja_float = 0
     jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
@@ -160,7 +156,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_kerja = "0.00"
         jam_lembur = "0.00"
         shift = status
-        ket = cek_keterangan_dari_tanggal(datetime.now(), "", "", 0, status)
+        ket = cek_keterangan_dari_tanggal(datetime.now(), "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -170,13 +166,15 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ket = "BELUM ABSEN PULANG"
     else:
         jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status)
+    
     row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_str)]
+    
     if not existing.empty:
         row_num = existing.index[0] + 2
-        ws_absen.update(f'A{row_num}:I{row_num}', [row_data])
+        ws_absen.update(f'A{row_num}:I{row_num}', [row_data]) # PAKSA 9 KOLOM
     else:
-        ws_absen.append_row(row_data)
+        ws_absen.insert_row(row_data, 2) # INSERT 9 KOLOM
     load_data.clear()
 
 def update_semua_keterangan():
