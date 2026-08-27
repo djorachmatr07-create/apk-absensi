@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.3 - AUTO BUAT LIBUR")
+st.title("📍 APK ABSENSI V10.4 - BATCH UPDATE")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -165,14 +165,15 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-# INI BARU: AUTO BUAT DATA LIBUR NASIONAL
+# FIX: PAKAI BATCH UPDATE SEMUA
 def update_semua_keterangan():
     if db_df.empty: return 0
-    total_update = 0
     progress_bar = st.progress(0, text="Mulai update...")
     
+    updates = [] # untuk update data lama
+    new_rows = [] # untuk data libur baru
+    
     # 1. UPDATE DATA LAMA
-    updates = []
     for i, row in absen_df.iterrows():
         if row['JAM MASUK'] and row['JAM PULANG']:
             masuk_dt = pd.to_datetime(row['JAM MASUK'])
@@ -188,7 +189,7 @@ def update_semua_keterangan():
 
         row_num = i + 2
         updates.append({'range': f'E{row_num}:K{row_num}', 'values': [[jam_kerja, jam_lembur, l1, l2, shift, ket, status_lama]]})
-        total_update += 1
+        progress_bar.progress(0.5, text=f"Update data lama {i+1}/{len(absen_df)}")
     
     # 2. BUAT DATA BARU UNTUK LIBUR NASIONAL YG BELUM ADA
     for tgl_libur_str, nama_libur in LIBUR_NASIONAL.items():
@@ -198,19 +199,19 @@ def update_semua_keterangan():
         for _, kar in db_df.iterrows():
             id_kar = kar['ID KARYAWAN']
             nama_kar = kar['NAMA KARYAWAN']
-            # cek apakah karyawan ini sudah ada data di tgl libur
             ada = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_libur_format)]
             if ada.empty:
-                # buat data baru status L
                 row_data = [id_kar, nama_kar, "", "", "0.00", "0.00", "0.00", "0.00", "SL", f"LIBUR NASIONAL: {nama_libur}", "L"]
-                ws_absen.insert_row(row_data, 2)
-                total_update += 1
+                new_rows.append(row_data)
     
+    # GABUNGKAN SEMUA DAN KIRIM 1x
     if updates: ws_absen.batch_update(updates)
+    if new_rows: ws_absen.append_rows(new_rows) # append_rows lebih aman dari insert_row berkali2
+    
     progress_bar.progress(1.0, text="Selesai")
     progress_bar.empty()
     load_data.clear()
-    return total_update
+    return len(updates) + len(new_rows)
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
