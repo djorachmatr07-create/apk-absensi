@@ -7,7 +7,9 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.2 - GENERATE PER ID")
+st.title("📍 APK ABSENSI V10.3 - GENERATE PER ID + FIX")
+
+st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -135,7 +137,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_lembur = "0.00"
         l1, l2 = "0.00", "0.00"
         shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status
-        ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status)
+        ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -192,9 +194,14 @@ def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
     df_reload['TGL_SORT'] = pd.to_datetime(df_reload['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
     df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_SORT'], ascending=[True, True])
     df_reload = df_reload.drop(columns=['TGL_SORT'])
+
+    # FIX TYPEERROR: ubah semua ke string
+    df_reload = df_reload.astype(str).fillna("")
+    df_reload = df_reload.replace('nan', '').replace('NaT', '')
+    values_to_update = [HEADER] + df_reload.values.tolist()
     
     ws_absen.clear()
-    ws_absen.update([HEADER] + df_reload.values.tolist())
+    ws_absen.update(values_to_update, value_input_option='RAW')
     return len(rows_to_add)
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
