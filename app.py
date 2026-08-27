@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.6 - FIX UPDATE LEMBUR")
+st.title("📍 APK ABSENSI V9.7 - FORCE HITUNG ULANG")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -176,21 +176,26 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-# FIX: UPDATE SEMUA + ADA PROGRESS BAR
+# INI KUNCINYA: HITUNG DARI JAM MASUK PULANG LAGI
 def update_semua_keterangan():
     if absen_df.empty: return 0
     total = len(absen_df)
     progress_bar = st.progress(0, text="Mulai update...")
     updates = []
     for i, row in absen_df.iterrows():
-        masuk_dt = pd.to_datetime(row['JAM MASUK']) if row['JAM MASUK'] else datetime.now()
-        pulang_dt = pd.to_datetime(row['JAM PULANG']) if row['JAM PULANG'] else datetime.now()
-        status_lama = row.get('STATUS', 'H')
-        jam_kerja, jam_lembur, shift, ket, _, _ = hitung(masuk_dt, pulang_dt, status_lama)
+        if row['JAM MASUK'] and row['JAM PULANG']:
+            masuk_dt = pd.to_datetime(row['JAM MASUK'])
+            pulang_dt = pd.to_datetime(row['JAM PULANG'])
+            status_lama = row.get('STATUS', 'H')
+            # HITUNG ULANG DARI NOL
+            jam_kerja, jam_lembur, shift, ket, _, _ = hitung(masuk_dt, pulang_dt, status_lama)
+        else:
+            status_lama = row.get('STATUS', 'H')
+            jam_kerja, jam_lembur, shift, ket = "0.00", "0.00", status_lama, cek_keterangan_dari_tanggal(datetime.now(), "", 0, status_lama)
+
         row_num = i + 2
         updates.append({'range': f'E{row_num}:I{row_num}', 'values': [[jam_kerja, jam_lembur, shift, ket, status_lama]]})
         progress_bar.progress((i + 1) / total, text=f"Update data {i+1}/{total}")
-        time.sleep(0.05) # biar keliatan loadingnya
     ws_absen.batch_update(updates)
     progress_bar.empty()
     load_data.clear()
@@ -271,10 +276,10 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("Klik tombol ini untuk hitung ulang semua data lama pake rumus lembur baru")
+    st.warning("⚠️ Klik ini untuk hitung ulang semua data lama. Lama tergantung jumlah data")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True):
         jml = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml} data diupdate. Refresh Google Sheet kamu")
+        st.success(f"✅ Selesai! {jml} data diupdate. Refresh Google Sheet Ctrl+R")
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
