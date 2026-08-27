@@ -37,6 +37,7 @@ def get_libur_dari_ics():
     except: return {}
 
 LIBUR_NASIONAL = get_libur_dari_ics()
+HEADER = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS']
 
 def hitung_lembur_baru(jam_kerja_float):
     try: jam_kerja_float = float(jam_kerja_float or 0)
@@ -52,25 +53,20 @@ def hitung_lembur_baru(jam_kerja_float):
                 lembur_2_0 = jam_lembur_total - 1.0
     return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
     all_values = ws_absen.get_all_values()
-    header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS']
     if len(all_values) > 1:
         data = [row[:11] for row in all_values[1:]]
-        absen = pd.DataFrame(data, columns=header) if data else pd.DataFrame(columns=header)
+        absen = pd.DataFrame(data, columns=HEADER) if data else pd.DataFrame(columns=HEADER)
     else:
-        absen = pd.DataFrame(columns=header)
-
-    for col in header:
-        if col not in absen.columns: absen[col] = ''
+        absen = pd.DataFrame(columns=HEADER)
 
     if not absen.empty:
         absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
         absen['JAM MASUK DT'] = pd.to_datetime(absen['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-        absen['JAM PULANG DT'] = pd.to_datetime(absen['JAM PULANG'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
     return db, absen
 
@@ -139,7 +135,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_lembur = "0.00"
         l1, l2 = "0.00", "0.00"
         shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status
-        ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status)
+        ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -161,56 +157,44 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-def generate_dan_rapikan_sheet(id_pilih, tgl_awal, tgl_akhir): 
+def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
     all_values = ws_absen.get_all_values()
-    if len(all_values) < 1: return 0
-    header = all_values[0]
-    data = all_values[1:]
-    df = pd.DataFrame(data, columns=header)
+    df = pd.DataFrame(all_values[1:], columns=HEADER) if len(all_values) > 1 else pd.DataFrame(columns=HEADER)
     
     rows_to_add = []
     date_range = pd.date_range(start=tgl_awal, end=tgl_akhir)
+    nama_kar = db_df[db_df['ID KARYAWAN']==id_kar_pilih]['NAMA KARYAWAN'].values[0]
     
-    # Tentukan karyawan yg mau di generate
-    if id_pilih == "SEMUA KARYAWAN":
-        df_kar = db_df
-    else:
-        df_kar = db_df[db_df['ID KARYAWAN'] == id_pilih]
-    
-    for _, kar in df_kar.iterrows():
-        id_kar = kar['ID KARYAWAN']
-        nama_kar = kar['NAMA KARYAWAN']
-        for tgl in date_range:
-            tgl_str = tgl.strftime('%d/%m/%Y')
-            tgl_ics = tgl.strftime('%Y-%m-%d')
-            jam_dummy = f"{tgl_str} 00:00:00" 
-            
-            ada = df[(df['ID KARYAWAN'] == id_kar) & (df['JAM MASUK'].str.contains(tgl_str, na=False))]
-            if ada.empty:
-                if tgl_ics in LIBUR_NASIONAL:
-                    ket = f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_ics]}"
-                    shift = "SL"
-                    status = "L"
-                else:
-                    ket = "TIDAK MASUK"
-                    shift = "-"
-                    status = "A"
-                
-                row_data = [id_kar, nama_kar, jam_dummy, "", "0.00", "0.00", "0.00", "0.00", shift, ket, status]
-                rows_to_add.append(row_data)
+    for tgl in date_range:
+        tgl_str = tgl.strftime('%d/%m/%Y')
+        tgl_ics = tgl.strftime('%Y-%m-%d')
+        jam_dummy = f"{tgl_str} 00:00:00"
+        
+        ada = df[(df['ID KARYAWAN'] == id_kar_pilih) & (df['JAM MASUK'].str.contains(tgl_str, na=False))]
+        if ada.empty:
+            if tgl_ics in LIBUR_NASIONAL:
+                ket = f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_ics]}"
+                shift = "SL"
+                status = "L"
+            else:
+                ket = "TIDAK MASUK"
+                shift = "-"
+                status = "A"
+            row_data = [id_kar_pilih, nama_kar, jam_dummy, "", "0.00", "0.00", "0.00", "0.00", shift, ket, status]
+            rows_to_add.append(row_data)
     
     if rows_to_add:
         ws_absen.append_rows(rows_to_add, value_input_option='RAW')
     
+    # RAPIKAN SEMUA
     load_data.clear()
     db_reload, df_reload = load_data()
-    
     df_reload['TGL_SORT'] = pd.to_datetime(df_reload['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
     df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_SORT'], ascending=[True, True])
     df_reload = df_reload.drop(columns=['TGL_SORT'])
     
     ws_absen.clear()
-    ws_absen.update([header] + df_reload.values.tolist())
+    ws_absen.update([HEADER] + df_reload.values.tolist())
     return len(rows_to_add)
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
@@ -287,21 +271,18 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("⚠️ Generate data kosong + urutkan")
-    
-    opsi_id = ["SEMUA KARYAWAN"] + db_df['ID KARYAWAN'].tolist()
-    id_generate = st.selectbox("Pilih ID Karyawan", opsi_id, format_func=lambda x: f"{x} - {db_df[db_df['ID KARYAWAN']==x]['NAMA KARYAWAN'].values[0]}" if x!= "SEMUA KARYAWAN" else x, key="id_generate")
-    
+    st.warning("⚠️ Generate data kosong + urutkan per 1 ID")
+    id_generate = st.selectbox("Pilih ID Karyawan", options=db_df['ID KARYAWAN'].tolist(), format_func=lambda x: f"{x} - {db_df[db_df['ID KARYAWAN']==x]['NAMA KARYAWAN'].values[0]}", key="id_generate")
     col1, col2 = st.columns(2)
     with col1:
-        tgl_awal = st.date_input("Dari Tanggal", datetime(2026,8,18), key="tgl_awal")
+        tgl_awal = st.date_input("Dari Tanggal", datetime(2026,8,16), key="tgl_awal")
     with col2:
         tgl_akhir = st.date_input("Sampai Tanggal", datetime(2026,8,28), key="tgl_akhir")
     
     if st.button("🔄 GENERATE & URUTKAN DATA", type="primary", use_container_width=True, key="btn_update"):
         with st.spinner("Sedang generate data kosong..."):
             jml = generate_dan_rapikan_sheet(id_generate, tgl_awal, tgl_akhir)
-        st.success(f"✅ Selesai! {jml} data baru ditambahkan. Tgl 18-28 sudah lengkap. Refresh Ctrl+R")
+        st.success(f"✅ Selesai! {jml} data baru ditambahkan. Refresh Ctrl+R")
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
