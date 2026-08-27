@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.5 - ANTI ERROR API")
+st.title("📍 APK ABSENSI V10.5 - AUTO URUT TANGGAL")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -162,14 +162,28 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         row_num = existing.index[0] + 2
         ws_absen.update(f'A{row_num}:K{row_num}', [row_data])
     else:
-        ws_absen.append_row(row_data) # GANTI JADI APPEND_ROW BIAR DI BAWAH
+        ws_absen.insert_row(row_data, 2)
     load_data.clear()
+
+def rapikan_sheet(): # FUNGSI BARU BUAT URUTIN
+    all_values = ws_absen.get_all_values()
+    if len(all_values) < 2: return
+    header = all_values[0]
+    data = all_values[1:]
+    df = pd.DataFrame(data, columns=header)
+    df = df[df['ID KARYAWAN']!= '']
+    df['TGL_SORT'] = pd.to_datetime(df['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+    df = df.sort_values(['ID KARYAWAN', 'TGL_SORT'], ascending=[True, True])
+    df = df.drop(columns=['TGL_SORT'])
+    df = df.drop_duplicates(subset=['ID KARYAWAN', 'JAM MASUK'], keep='first')
+    ws_absen.clear()
+    ws_absen.update([header] + df.values.tolist())
 
 def update_semua_keterangan():
     if db_df.empty: return 0, 0
     total_update = 0
     total_baru = 0
-    progress_bar = st.progress(0, text="Mulai update...")
+    progress_bar = st.progress(0, text="1/3 Update data lama...")
     
     # 1. UPDATE DATA LAMA
     updates = []
@@ -184,54 +198,39 @@ def update_semua_keterangan():
             jam_kerja, jam_lembur, l1, l2 = "0.00", "0.00", "0.00", "0.00"
             masuk_dt = pd.to_datetime(row['JAM MASUK']) if row['JAM MASUK'] else datetime.now()
             shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status_lama
-            ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status_lama)
+            ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status_lama)
 
         row_num = i + 2
         updates.append({'range': f'E{row_num}:K{row_num}', 'values': [[jam_kerja, jam_lembur, l1, l2, shift, ket, status_lama]]})
         total_update += 1
     
     if updates: ws_absen.batch_update(updates)
-    progress_bar.progress(0.5, text="Cek data libur...")
     
-    # 2. BUAT DATA BARU LIBUR - PAKAI APPEND SEKALIGUS
+    # 2. BUAT DATA BARU LIBUR
+    progress_bar.progress(0.66, text="2/3 Tambah data libur...")
+    db_reload, absen_reload = load_data() # reload biar data terbaru
     rows_to_add = []
     for tgl_libur_str, nama_libur in LIBUR_NASIONAL.items():
         tgl_libur_dt = datetime.strptime(tgl_libur_str, '%Y-%m-%d')
         tgl_libur_format = tgl_libur_dt.strftime('%d/%m/%Y')
-        
-        for _, kar in db_df.iterrows():
+        for _, kar in db_reload.iterrows():
             id_kar = kar['ID KARYAWAN']
             nama_kar = kar['NAMA KARYAWAN']
-            ada = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_libur_format)]
+            ada = absen_reload[(absen_reload['ID KARYAWAN'] == id_kar) & (absen_reload['TGL'] == tgl_libur_format)]
             if ada.empty:
-                row_data = [id_kar, nama_kar, "", "0.00", "0.00", "0.00", "0.00", "SL", f"LIBUR NASIONAL: {nama_libur}", "L"]
+                row_data = [id_kar, nama_kar, "", "", "0.00", "0.00", "0.00", "0.00", "SL", f"LIBUR NASIONAL: {nama_libur}", "L"]
                 rows_to_add.append(row_data)
                 total_baru += 1
     
-    # KUNCI: APPEND SEMUA SEKALIGUS
-    if rows_to_add:
-        ws_absen.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+    for row in rows_to_add:
+        ws_absen.append_row(row) # ganti jadi append biar di bawah
         
-    progress_bar.progress(1.0, text="Selesai")
+    # 3. RAPIKAN
+    progress_bar.progress(1.0, text="3/3 Merapikan urutan...")
+    rapikan_sheet()
     progress_bar.empty()
     load_data.clear()
     return total_update, total_baru
-
-def hapus_duplikat():
-    st.warning("Ini akan hapus semua baris kosong/ duplikat")
-    if st.button("🗑️ HAPUS DUPLIKAT SEKARANG", type="secondary"):
-        with st.spinner("Menghapus..."):
-            all_values = ws_absen.get_all_values()
-            if len(all_values) < 2: return
-            header = all_values[0]
-            data = all_values[1:]
-            df = pd.DataFrame(data, columns=header)
-            df = df[df['ID KARYAWAN']!= '']
-            df = df.drop_duplicates(subset=['ID KARYAWAN', 'JAM MASUK'], keep='first')
-            ws_absen.clear()
-            ws_absen.update([header] + df.values.tolist())
-        st.success("✅ Duplikat berhasil dihapus. Refresh sheet")
-        load_data.clear()
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
@@ -311,11 +310,10 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {DAFTAR_STATUS_EDIT[kode_pilih]}"); st.rerun()
 
 with menu[2]:
-    st.warning("⚠️ Langkah 1: Hapus duplikat dulu. Langkah 2: Update data")
-    hapus_duplikat()
-    if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True, key="btn_update"):
+    st.warning("⚠️ Klik ini untuk update + rapikan urutan tanggal otomatis")
+    if st.button("🔄 UPDATE & RAPIKAN DATA", type="primary", use_container_width=True, key="btn_update"):
         jml_update, jml_baru = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml_update} data diupdate, {jml_baru} data libur baru ditambahkan. Refresh Ctrl+R")
+        st.success(f"✅ Selesai! {jml_update} diupdate, {jml_baru} libur baru. Data sudah diurutkan. Refresh Ctrl+R")
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
