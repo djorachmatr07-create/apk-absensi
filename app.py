@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.2 - FIX SYNTAX")
+st.title("📍 APK ABSENSI V10.3 - AUTO BUAT LIBUR")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -63,7 +63,7 @@ def load_data():
     header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS']
     if len(all_values) > 1:
         data = [row[:11] for row in all_values[1:]]
-        absen = pd.DataFrame(data, columns=header) if data else pd.DataFrame(columns=header) # UDAH DIBENERIN KURUNG
+        absen = pd.DataFrame(data, columns=header) if data else pd.DataFrame(columns=header)
     else:
         absen = pd.DataFrame(columns=header)
 
@@ -87,11 +87,8 @@ def bulatkan_ke_jam_pas(dt):
 def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str="", jam_pulang_str="", jam_kerja_float=0, status="H"):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
-    
-    # PRIORITAS 1: CEK LIBUR NASIONAL
     if tgl_str in LIBUR_NASIONAL:
         return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
-        
     if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0: return "MASUK"
     if jam_kerja_float == 0:
         if status == 'L': return "SHIFT LIBUR"
@@ -145,8 +142,8 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_kerja = "0.00"
         jam_lembur = "0.00"
         l1, l2 = "0.00", "0.00"
-        shift = 'SL' if tgl_str in LIBUR_NASIONAL else status
-        ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status)
+        shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status
+        ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -168,10 +165,13 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
+# INI BARU: AUTO BUAT DATA LIBUR NASIONAL
 def update_semua_keterangan():
-    if absen_df.empty: return 0
-    total = len(absen_df)
+    if db_df.empty: return 0
+    total_update = 0
     progress_bar = st.progress(0, text="Mulai update...")
+    
+    # 1. UPDATE DATA LAMA
     updates = []
     for i, row in absen_df.iterrows():
         if row['JAM MASUK'] and row['JAM PULANG']:
@@ -188,11 +188,29 @@ def update_semua_keterangan():
 
         row_num = i + 2
         updates.append({'range': f'E{row_num}:K{row_num}', 'values': [[jam_kerja, jam_lembur, l1, l2, shift, ket, status_lama]]})
-        progress_bar.progress((i + 1) / total, text=f"Update {i+1}/{total}")
-    ws_absen.batch_update(updates)
+        total_update += 1
+    
+    # 2. BUAT DATA BARU UNTUK LIBUR NASIONAL YG BELUM ADA
+    for tgl_libur_str, nama_libur in LIBUR_NASIONAL.items():
+        tgl_libur_dt = datetime.strptime(tgl_libur_str, '%Y-%m-%d')
+        tgl_libur_format = tgl_libur_dt.strftime('%d/%m/%Y')
+        
+        for _, kar in db_df.iterrows():
+            id_kar = kar['ID KARYAWAN']
+            nama_kar = kar['NAMA KARYAWAN']
+            # cek apakah karyawan ini sudah ada data di tgl libur
+            ada = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_libur_format)]
+            if ada.empty:
+                # buat data baru status L
+                row_data = [id_kar, nama_kar, "", "", "0.00", "0.00", "0.00", "0.00", "SL", f"LIBUR NASIONAL: {nama_libur}", "L"]
+                ws_absen.insert_row(row_data, 2)
+                total_update += 1
+    
+    if updates: ws_absen.batch_update(updates)
+    progress_bar.progress(1.0, text="Selesai")
     progress_bar.empty()
     load_data.clear()
-    return len(updates)
+    return total_update
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
@@ -272,10 +290,10 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {DAFTAR_STATUS_EDIT[kode_pilih]}"); st.rerun()
 
 with menu[2]:
-    st.warning("⚠️ Klik ini untuk hitung ulang semua data. Tanggal libur akan otomatis ke detect")
+    st.warning("⚠️ Klik ini untuk buat otomatis data libur nasional + update data lama")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True, key="btn_update"):
         jml = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml} data diupdate. Refresh Google Sheet Ctrl+R")
+        st.success(f"✅ Selesai! {jml} data diproses. Refresh Google Sheet Ctrl+R")
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
