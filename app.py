@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.6 - 2 TOMBOL + WARNING")
+st.title("📍 APK ABSENSI V10.7 - TERBARU DI ATAS")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -187,7 +187,8 @@ def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
     
     load_data.clear()
     db_reload, df_reload = load_data()
-    df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_DT'], ascending=[True, True])
+    # INI YG DIUBAH: ascending=False biar terbaru di atas
+    df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_DT'], ascending=[True, False])
     df_reload = df_reload.drop(columns=['TGL_DT'])
     df_reload = df_reload.astype(str).fillna("")
     df_reload = df_reload.replace('nan', '').replace('NaT', '')
@@ -221,7 +222,7 @@ with menu[0]:
                 upsert_absen(id_in, datetime.combine(tgl, datetime.now().time()), datetime.combine(tgl, datetime.now().time()), nama, status_pilih)
                 st.balloons(); st.success(f"✅ Status {DAFTAR_STATUS_ABSEN[status_pilih]} berhasil disimpan"); st.rerun()
 
-    # LOGIKA BARU: 2 TOMBOL SELALU MUNCUL
+    # 2 TOMBOL SELALU MUNCUL
     sudah_masuk = False
     sudah_pulang = False
     jam_masuk_lama = ""
@@ -269,7 +270,7 @@ with menu[1]:
         if id_edit in db_df['ID KARYAWAN'].values:
             data_kar = absen_df[absen_df['ID KARYAWAN']==id_edit]
             if not data_kar.empty:
-                opsi_tgl = data_kar.sort_values('TGL_DT')['TANGGAL'].tolist()
+                opsi_tgl = data_kar.sort_values('TGL_DT', ascending=False)['TANGGAL'].tolist() # EDIT JUGA BIAR TERBARU DI ATAS
                 pilih = st.selectbox("Pilih Tanggal Data", opsi_tgl, key="pilih_tgl_edit")
                 row = data_kar[data_kar['TANGGAL']==pilih].iloc[0]
                 col1, col2 = st.columns(2)
