@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.0 - FINAL")
+st.title("📍 APK ABSENSI V10.1 - AUTO LIBUR NASIONAL")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -63,7 +63,7 @@ def load_data():
     header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS']
     if len(all_values) > 1:
         data = [row[:11] for row in all_values[1:]]
-        absen = pd.DataFrame(data, columns=header[:len(data[0])]) if data else pd.DataFrame(columns=header)
+        absen = pd.DataFrame(data, columns=header[:len(data[0]) if data else pd.DataFrame(columns=header)
     else:
         absen = pd.DataFrame(columns=header)
 
@@ -87,11 +87,14 @@ def bulatkan_ke_jam_pas(dt):
 def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str="", jam_pulang_str="", jam_kerja_float=0, status="H"):
     tgl_str = tanggal_dt.strftime('%Y-%m-%d')
     weekday = tanggal_dt.weekday()
+    
+    # KUNCI: CEK LIBUR NASIONAL DULU
+    if tgl_str in LIBUR_NASIONAL:
+        return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
+        
     if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0: return "MASUK"
     if jam_kerja_float == 0:
-        if status == 'L' or tgl_str in LIBUR_NASIONAL:
-            if tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
-            else: return "SHIFT LIBUR"
+        if status == 'L': return "SHIFT LIBUR"
         elif status == 'A': return "ALFA"
         elif status == 'I': return "IZIN"
         elif status == 'S': return "SAKIT"
@@ -142,8 +145,8 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_kerja = "0.00"
         jam_lembur = "0.00"
         l1, l2 = "0.00", "0.00"
-        shift = status
-        ket = cek_keterangan_dari_tanggal(datetime.now(), "", "", 0, status)
+        shift = 'SL' if tgl_str in LIBUR_NASIONAL else status # AUTO SL KALO LIBUR
+        ket = cek_keterangan_dari_tanggal(datetime.now(), "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -179,8 +182,9 @@ def update_semua_keterangan():
         else:
             status_lama = row.get('STATUS', 'H')
             jam_kerja, jam_lembur, l1, l2 = "0.00", "0.00", "0.00", "0.00"
-            shift = status_lama
-            ket = cek_keterangan_dari_tanggal(datetime.now(), "", "", 0, status_lama)
+            masuk_dt = pd.to_datetime(row['JAM MASUK']) if row['JAM MASUK'] else datetime.now()
+            shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status_lama
+            ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status_lama)
 
         row_num = i + 2
         updates.append({'range': f'E{row_num}:K{row_num}', 'values': [[jam_kerja, jam_lembur, l1, l2, shift, ket, status_lama]]})
@@ -268,7 +272,7 @@ with menu[1]:
                     st.success(f"✅ Edit berhasil. Status: {DAFTAR_STATUS_EDIT[kode_pilih]}"); st.rerun()
 
 with menu[2]:
-    st.warning("⚠️ Klik ini 1x untuk hitung ulang semua data lama ke rumus lembur baru")
+    st.warning("⚠️ Klik ini untuk hitung ulang semua data. Tanggal libur akan otomatis ke detect")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True, key="btn_update"):
         jml = update_semua_keterangan()
         st.success(f"✅ Selesai! {jml} data diupdate. Refresh Google Sheet Ctrl+R")
