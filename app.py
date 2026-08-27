@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.9 - BASE V9.8 + LIBUR + URUT")
+st.title("📍 APK ABSENSI V10.0 - GENERATE TANGGAL KOSONG")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -22,7 +22,7 @@ def connect_gsheet():
 
 ws_absen, ws_db = connect_gsheet()
 
-@st.cache_data(ttl=86400) # cache 1 hari
+@st.cache_data(ttl=86400)
 def get_libur_dari_ics():
     try:
         r = requests.get(ICS_URL, timeout=10)
@@ -139,7 +139,7 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         jam_lembur = "0.00"
         l1, l2 = "0.00", "0.00"
         shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status
-        ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status)
+        ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status)
     elif not sudah_pulang:
         jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
         jam_pulang_str = ""
@@ -161,44 +161,52 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
-def rapikan_sheet(): # TAMBAHAN BUAT URUTIN
+def generate_dan_rapikan_sheet(tgl_awal, tgl_akhir): # FUNGSI BARU
     all_values = ws_absen.get_all_values()
-    if len(all_values) < 2: return
+    if len(all_values) < 1: return
     header = all_values[0]
     data = all_values[1:]
     df = pd.DataFrame(data, columns=header)
+    
+    rows_to_add = []
+    date_range = pd.date_range(start=tgl_awal, end=tgl_akhir)
+    
+    for _, kar in db_df.iterrows():
+        id_kar = kar['ID KARYAWAN']
+        nama_kar = kar['NAMA KARYAWAN']
+        for tgl in date_range:
+            tgl_str = tgl.strftime('%d/%m/%Y')
+            tgl_ics = tgl.strftime('%Y-%m-%d')
+            ada = df[(df['ID KARYAWAN'] == id_kar) & (df['JAM MASUK'].str.contains(tgl_str, na=False))]
+            if ada.empty:
+                # kalau tgl libur nasional
+                if tgl_ics in LIBUR_NASIONAL:
+                    ket = f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_ics]}"
+                    shift = "SL"
+                    status = "L"
+                else:
+                    ket = "TIDAK MASUK"
+                    shift = "-"
+                    status = "A"
+                
+                row_data = [id_kar, nama_kar, "", "0.00", "0.00", "0.00", "0.00", shift, ket, status]
+                rows_to_add.append(row_data)
+    
+    if rows_to_add:
+        ws_absen.append_rows(rows_to_add, value_input_option='RAW')
+    
+    # reload dan urutkan
+    all_values = ws_absen.get_all_values()
+    df = pd.DataFrame(all_values[1:], columns=header)
     df = df[df['ID KARYAWAN']!= '']
     df['TGL_SORT'] = pd.to_datetime(df['JAM MASUK'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+    # yg kosong jam masuk diisi tgl dummy biar bisa urut
+    df['TGL_SORT'] = df['TGL_SORT'].fillna(pd.to_datetime('01/01/1900', format='%d/%m/%Y'))
     df = df.sort_values(['ID KARYAWAN', 'TGL_SORT'], ascending=[True, True])
     df = df.drop(columns=['TGL_SORT'])
     df = df.drop_duplicates(subset=['ID KARYAWAN', 'JAM MASUK'], keep='first')
     ws_absen.clear()
     ws_absen.update([header] + df.values.tolist())
-
-def update_semua_keterangan():
-    updates = []
-    total = 0
-    for i, row in absen_df.iterrows():
-        if row['JAM MASUK'] and row['JAM PULANG']:
-            masuk_dt = pd.to_datetime(row['JAM MASUK'])
-            pulang_dt = pd.to_datetime(row['JAM PULANG'])
-            status_lama = row.get('STATUS', 'H')
-            jam_kerja, jam_lembur, l1, l2, shift, ket, _, _ = hitung(masuk_dt, pulang_dt, status_lama)
-        else:
-            status_lama = row.get('STATUS', 'H')
-            jam_kerja, jam_lembur, l1, l2 = "0.00", "0.00", "0.00", "0.00"
-            masuk_dt = pd.to_datetime(row['JAM MASUK']) if row['JAM MASUK'] else datetime.now()
-            shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status_lama
-            ket = cek_keterangan_dari_tanggal(masuk_dt, "", 0, status_lama)
-
-        row_num = i + 2
-        updates.append({'range': f'E{row_num}:K{row_num}', 'values': [[jam_kerja, jam_lembur, l1, l2, shift, ket, status_lama]]})
-        total += 1
-    
-    if updates: ws_absen.batch_update(updates)
-    rapikan_sheet() # LANGSUNG URUTIN SETELAH UPDATE
-    load_data.clear()
-    return total
 
 menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
 
@@ -274,10 +282,17 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("⚠️ Klik ini untuk update keterangan + auto urut tanggal")
-    if st.button("🔄 UPDATE & URUTKAN DATA", type="primary", use_container_width=True, key="btn_update"):
-        jml = update_semua_keterangan()
-        st.success(f"✅ Selesai! {jml} data diupdate dan sudah diurutkan. Refresh Ctrl+R")
+    st.warning("⚠️ Klik ini untuk generate tgl kosong 18-28 + urutkan")
+    col1, col2 = st.columns(2)
+    with col1:
+        tgl_awal = st.date_input("Dari Tanggal", datetime(2026,8,18), key="tgl_awal")
+    with col2:
+        tgl_akhir = st.date_input("Sampai Tanggal", datetime(2026,8,28), key="tgl_akhir")
+    
+    if st.button("🔄 GENERATE & URUTKAN DATA", type="primary", use_container_width=True, key="btn_update"):
+        with st.spinner("Sedang generate data kosong..."):
+            generate_dan_rapikan_sheet(tgl_awal, tgl_akhir)
+        st.success(f"✅ Selesai! Tgl 18-28 sudah lengkap dan diurutkan. Refresh Ctrl+R")
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
