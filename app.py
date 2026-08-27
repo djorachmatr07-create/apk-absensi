@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V9.4 FINAL")
+st.title("📍 APK ABSENSI V9.5 - FIX LEMBUR x1.5 x2.0")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -40,6 +40,7 @@ def get_libur_dari_ics():
 
 LIBUR_NASIONAL = get_libur_dari_ics()
 
+# FIX RUMUS LEMBUR BARU
 def hitung_lembur_baru(jam_kerja_float):
     try:
         jam_kerja_float = float(jam_kerja_float or 0)
@@ -50,21 +51,21 @@ def hitung_lembur_baru(jam_kerja_float):
     lembur_2_0 = 0.0
     if jam_kerja_float > jam_normal:
         jam_lembur_total = jam_kerja_float - jam_normal
-        if jam_lembur_total >= 1.0:
-            lembur_1_5 = 1.0
+        if jam_lembur_total > 0:
+            lembur_1_5 = min(1.0, jam_lembur_total) # JAM KE-1
             if jam_lembur_total > 1.0:
-                lembur_2_0 = jam_lembur_total - 1.0
+                lembur_2_0 = jam_lembur_total - 1.0 # JAM KE-2 DST
     return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
 
 @st.cache_data(ttl=300)
 def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
-    
+
     all_values = ws_absen.get_all_values()
     if len(all_values) > 1:
-        header = all_values[0][:9] # AMBIL 9 KOLOM PERTAMA AJA
-        data = [row[:9] for row in all_values[1:]] # AMBIL 9 KOLOM PERTAMA AJA
+        header = all_values[0][:9]
+        data = [row[:9] for row in all_values[1:]]
         absen = pd.DataFrame(data, columns=header)
     else:
         header = ['ID KARYAWAN', 'NAMA KARYAWAN', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'SHIFT', 'KETERANGAN', 'STATUS']
@@ -79,6 +80,8 @@ def load_data():
         absen['TGL'] = absen['JAM MASUK DT'].dt.strftime('%d/%m/%Y')
         absen['LEMBUR 1.5'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[0])
         absen['LEMBUR 2.0'] = absen['JAM KERJA'].apply(lambda x: hitung_lembur_baru(x)[1])
+        # URUTKAN TANGGAL TERBARU DI ATAS
+        absen = absen.sort_values('JAM MASUK DT', ascending=False)
     else:
         absen['JAM MASUK DT'] = pd.to_datetime([])
         absen['TGL'] = []
@@ -130,13 +133,12 @@ def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
-    
-    # LOGIKA ISTIRAHAT: KURANG DARI 8 JAM GAK POTONG
-    if total_jam_mentah >= 8.0: 
+
+    if total_jam_mentah >= 8.0:
         jam_kerja_float = total_jam_mentah - 1.0
-    else: 
+    else:
         jam_kerja_float = total_jam_mentah
-        
+
     if jam_kerja_float < 0: jam_kerja_float = 0
     jam_masuk_str = masuk_dt.strftime('%d/%m/%Y %H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%d/%m/%Y %H:%M:%S')
@@ -166,15 +168,15 @@ def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=Fal
         ket = "BELUM ABSEN PULANG"
     else:
         jam_kerja, jam_lembur, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status)
-    
+
     row_data = [id_kar, nama, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, shift, ket, status]
     existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TGL'] == tgl_str)]
-    
+
     if not existing.empty:
         row_num = existing.index[0] + 2
-        ws_absen.update(f'A{row_num}:I{row_num}', [row_data]) # PAKSA 9 KOLOM
+        ws_absen.update(f'A{row_num}:I{row_num}', [row_data])
     else:
-        ws_absen.insert_row(row_data, 2) # INSERT 9 KOLOM
+        ws_absen.insert_row(row_data, 2)
     load_data.clear()
 
 def update_semua_keterangan():
@@ -266,12 +268,14 @@ with menu[1]:
                     st.rerun()
 
 with menu[2]:
-    st.warning("Menu untuk update data lama")
+    st.warning("Menu untuk update data lama + hitung ulang lembur")
     if st.button("🔄 UPDATE SEMUA DATA", type="primary", use_container_width=True):
         with st.spinner("Mohon tunggu..."):
             jml = update_semua_keterangan()
-            st.success(f"✅ Selesai! {jml} data diupdate")
+            st.success(f"✅ Selesai! {jml} data diupdate. Silahkan refresh sheet")
             st.rerun()
 
 with menu[3]:
-    st.dataframe(absen_df.sort_values('JAM MASUK DT', ascending=False), use_container_width=True, height=600)
+    # TAMPILKAN DENGAN 2 KOLOM LEMBUR BARU
+    df_tampil = absen_df.copy()
+    st.dataframe(df_tampil, use_container_width=True, height=600)
