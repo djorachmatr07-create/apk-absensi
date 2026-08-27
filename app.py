@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
-st.title("📍 APK ABSENSI V10.5 - FORMAT TANGGAL + JAM SAJA")
+st.title("📍 APK ABSENSI V10.6 - 2 TOMBOL + WARNING")
 
 st.markdown("""<style>div.stButton > button[kind="primary"][data-testid="baseButton-secondary"] {background-color: #DC2626; color: white; border: none;} </style>""", unsafe_allow_html=True)
 
@@ -39,7 +39,6 @@ def get_libur_dari_ics():
     except: return {}
 
 LIBUR_NASIONAL = get_libur_dari_ics()
-# FORMAT SESUAI SS
 HEADER = ['ID KARYAWAN', 'NAMA KARYAWAN', 'TANGGAL', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS']
 
 def hitung_lembur_baru(jam_kerja_float):
@@ -118,8 +117,8 @@ def hitung(masuk_dt, pulang_dt, status):
     total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
     jam_kerja_float = total_jam_mentah - 1.0 if total_jam_mentah >= 8.0 else total_jam_mentah
     if jam_kerja_float < 0: jam_kerja_float = 0
-    jam_masuk_str = masuk_dt.strftime('%H:%M:%S') # CUMA JAM
-    jam_pulang_str = pulang_dt.strftime('%H:%M:%S') # CUMA JAM
+    jam_masuk_str = masuk_dt.strftime('%H:%M:%S')
+    jam_pulang_str = pulang_dt.strftime('%H:%M:%S')
     keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status)
     shift = cek_shift(masuk_dt, pulang_dt, jam_kerja_float, keterangan, status)
     lembur_1_5, lembur_2_0 = hitung_lembur_baru(jam_kerja_float)
@@ -128,7 +127,7 @@ def hitung(masuk_dt, pulang_dt, status):
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=False):
     id_kar = id_kar.zfill(8)
-    tgl_str = masuk_dt.strftime('%Y-%m-%d') # FORMAT YYYY-MM-DD
+    tgl_str = masuk_dt.strftime('%Y-%m-%d')
     STATUS_NON_JAM = ['A','I','S','C','L','GH','GHS','TL']
     if status in STATUS_NON_JAM:
         jam_masuk_str = ""
@@ -168,7 +167,7 @@ def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
     nama_kar = db_df[db_df['ID KARYAWAN']==id_kar_pilih]['NAMA KARYAWAN'].values[0]
     
     for tgl in date_range:
-        tgl_str = tgl.strftime('%Y-%m-%d') # FORMAT YYYY-MM-DD
+        tgl_str = tgl.strftime('%Y-%m-%d')
         
         ada = df[(df['ID KARYAWAN'] == id_kar_pilih) & (df['TANGGAL'] == tgl_str)]
         if ada.empty:
@@ -186,12 +185,10 @@ def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
     if rows_to_add:
         ws_absen.append_rows(rows_to_add, value_input_option='RAW')
     
-    # RAPIKAN SEMUA BERDASARKAN TANGGAL
     load_data.clear()
     db_reload, df_reload = load_data()
     df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_DT'], ascending=[True, True])
     df_reload = df_reload.drop(columns=['TGL_DT'])
-
     df_reload = df_reload.astype(str).fillna("")
     df_reload = df_reload.replace('nan', '').replace('NaT', '')
     values_to_update = [HEADER] + df_reload.values.tolist()
@@ -215,32 +212,49 @@ with menu[0]:
     data_hari_ini = pd.DataFrame()
     if id_in and not absen_df.empty:
         data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TANGGAL'] == tgl_str)]
+    
     with st.expander("⚙️ Ubah Status Khusus: GH, GHS, TL, I, S, C, A"):
         DAFTAR_STATUS_ABSEN = {"H": "H - HADIR NORMAL", "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU", "TL": "TL - TUKAR LIBUR", "I": "I - IZIN", "S": "S - SAKIT", "C": "C - CUTI", "A": "A - ALFA"}
         status_pilih = st.selectbox("Pilih Status Khusus", options=list(DAFTAR_STATUS_ABSEN.keys()), format_func=lambda x: DAFTAR_STATUS_ABSEN[x], index=0, key="status_absen")
-    if status_pilih!= "H":
-        if st.button(f"SIMPAN STATUS {status_pilih}", use_container_width=True, type="primary", key="btn_status"):
-            upsert_absen(id_in, datetime.combine(tgl, datetime.now().time()), datetime.combine(tgl, datetime.now().time()), nama, status_pilih)
-            st.balloons(); st.success(f"✅ Status {DAFTAR_STATUS_ABSEN[status_pilih]} berhasil disimpan"); st.rerun()
-    else:
-        if data_hari_ini.empty:
-            st.info("📌 Silahkan Absen Masuk Dulu")
-            jam_masuk = st.time_input("Jam Masuk", datetime.now().time(), key="jam_masuk_absen")
-            if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama, key="btn_masuk"):
+        if status_pilih!= "H":
+            if st.button(f"SIMPAN STATUS {status_pilih}", use_container_width=True, type="primary", key="btn_status"):
+                upsert_absen(id_in, datetime.combine(tgl, datetime.now().time()), datetime.combine(tgl, datetime.now().time()), nama, status_pilih)
+                st.balloons(); st.success(f"✅ Status {DAFTAR_STATUS_ABSEN[status_pilih]} berhasil disimpan"); st.rerun()
+
+    # LOGIKA BARU: 2 TOMBOL SELALU MUNCUL
+    sudah_masuk = False
+    sudah_pulang = False
+    jam_masuk_lama = ""
+    
+    if not data_hari_ini.empty:
+        data = data_hari_ini.iloc[0]
+        jam_masuk_lama = data['JAM MASUK']
+        if data['JAM MASUK']!= "": sudah_masuk = True
+        if data['JAM PULANG']!= "": sudah_pulang = True
+
+    col1, col2 = st.columns(2)
+    with col1:
+        jam_masuk = st.time_input("Jam Masuk", datetime.now().time(), key="jam_masuk_absen")
+        if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama, key="btn_masuk"):
+            if sudah_masuk:
+                st.warning(f"⚠️ Sudah Absen Masuk jam {jam_masuk_lama}")
+            else:
                 masuk_dt = datetime.combine(tgl, jam_masuk)
                 upsert_absen(id_in, masuk_dt, masuk_dt, nama, "H", sudah_pulang=False)
                 st.balloons(); st.success(f"✅ ABSEN MASUK BERHASIL!\nJam: {masuk_dt.strftime('%H:%M')}"); st.rerun()
-        else:
-            data = data_hari_ini.iloc[0]
-            if data['JAM MASUK']: st.success(f"📌 Sudah Absen Masuk: {data['JAM MASUK']}")
-            if data['JAM PULANG'] == "":
-                jam_pulang = st.time_input("Jam Pulang", datetime.now().time(), key="jam_pulang_absen")
-                if st.button("🔴 ABSEN PULANG", use_container_width=True, type="secondary", key="btn_pulang"):
-                    masuk_dt = datetime.combine(tgl, datetime.strptime(data['JAM MASUK'], '%H:%M:%S').time())
-                    pulang_dt = datetime.combine(tgl, jam_pulang)
-                    upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H", sudah_pulang=True)
-                    st.balloons(); st.success(f"✅ ABSEN PULANG BERHASIL!\nJam: {pulang_dt.strftime('%H:%M')}"); st.rerun()
-            else: st.info(f"✅ Sudah Absen Lengkap")
+    
+    with col2:
+        jam_pulang = st.time_input("Jam Pulang", datetime.now().time(), key="jam_pulang_absen")
+        if st.button("🔴 ABSEN PULANG", use_container_width=True, type="secondary", disabled=not nama, key="btn_pulang"):
+            if not sudah_masuk:
+                st.error("⚠️ Belum Absen Masuk. Silahkan absen masuk dulu")
+            elif sudah_pulang:
+                st.warning(f"⚠️ Sudah Absen Pulang jam {data['JAM PULANG']}")
+            else:
+                masuk_dt = datetime.combine(tgl, datetime.strptime(jam_masuk_lama, '%H:%M:%S').time())
+                pulang_dt = datetime.combine(tgl, jam_pulang)
+                upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H", sudah_pulang=True)
+                st.balloons(); st.success(f"✅ ABSEN PULANG BERHASIL!\nJam: {pulang_dt.strftime('%H:%M')}"); st.rerun()
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login = False
