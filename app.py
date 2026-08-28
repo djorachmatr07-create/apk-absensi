@@ -1,114 +1,289 @@
 import streamlit as st
 import gspread
 import pandas as pd
-from google.oauth2.service_account import Credentials
+import requests
 from datetime import datetime, timedelta
+from google.oauth2.service_account import Credentials
+from icalendar import Calendar
 
-st.set_page_config(layout="wide", page_title="V21 FIX LEMBUR")
-st.title("💰 GAJI V21 - LEMBUR X1.5 & X2")
+st.set_page_config(page_title="APK ABSENSI V1", layout="wide")
+st.title("📍 APK ABSENSI V10.8.1 - UANG SHIFT S2 S3 LONGSHIFT")
+
+PASSWORD_ADMIN = "admin123"
+ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
 
 @st.cache_resource
-def connect():
-    scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+def connect_gsheet():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     client = gspread.authorize(creds)
     sh = client.open("REKAP")
-    return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN"), sh.worksheet("DATA GAJI")
+    return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN")
 
-ws_absen, ws_db, ws_gaji = connect()
+ws_absen, ws_db = connect_gsheet()
+
+@st.cache_data(ttl=86400)
+def get_libur_dari_ics():
+    try:
+        r = requests.get(ICS_URL, timeout=10)
+        cal = Calendar.from_ical(r.text)
+        libur = {}
+        for component in cal.walk():
+            if component.name == "VEVENT":
+                start = component.get('dtstart').dt
+                if hasattr(start, 'strftime'): start = start.strftime('%Y-%m-%d')
+                libur[start] = str(component.get('summary'))
+        return libur
+    except: return {}
+
+LIBUR_NASIONAL = get_libur_dari_ics()
+HEADER = ['ID KARYAWAN', 'NAMA KARYAWAN', 'TANGGAL', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS', 'UANG SHIFT']
+
+def hitung_lembur_baru(jam_kerja_float):
+    try: jam_kerja_float = float(jam_kerja_float or 0)
+    except: jam_kerja_float = 0.0
+    jam_normal = 7.0
+    lembur_1_5 = 0.0
+    lembur_2_0 = 0.0
+    if jam_kerja_float > jam_normal:
+        jam_lembur_total = jam_kerja_float - jam_normal
+        if jam_lembur_total > 0:
+            lembur_1_5 = min(1.0, jam_lembur_total)
+            if jam_lembur_total > 1.0:
+                lembur_2_0 = jam_lembur_total - 1.0
+    return f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
 
 @st.cache_data(ttl=60)
-def load():
+def load_data():
     db = pd.DataFrame(ws_db.get_all_records())
-    db.columns = [c.strip().upper() for c in db.columns]
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
-    absen = pd.DataFrame(ws_absen.get_all_records())
-    absen.columns = [c.strip().upper() for c in absen.columns]
-    absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
-    absen['TANGGAL'] = pd.to_datetime(absen['TANGGAL'], errors='coerce')
-    return db, absen
+    col_uang = None
+    for c in db.columns:
+        if 'SHIFT' in c.upper() and 'UANG' in c.upper(): col_uang = c
+    if not col_uang:
+        for c in ['UANG SHIFT','UANG_SHIFT','TUNJANGAN SHIFT','SHIFT','UANG']:
+            if c in db.columns: col_uang = c; break
+    if not col_uang: col_uang = db.columns[-1]
 
-db_df, absen_df = load()
+    all_values = ws_absen.get_all_values()
+    if len(all_values) > 1:
+        data = [row[:13] for row in all_values[1:]]
+        absen = pd.DataFrame(data, columns=HEADER) if data else pd.DataFrame(columns=HEADER)
+    else:
+        absen = pd.DataFrame(columns=HEADER)
 
-def hitung_split(tgl, masuk, pulang):
-    """Aturan: Sabtu 5 jam efektif, Senin-Jumat 7 jam. Lembur: jam ke-1 x1.5, jam ke-2+ x2"""
+    if not absen.empty:
+        absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
+        absen['TGL_DT'] = pd.to_datetime(absen['TANGGAL'], format='%Y-%m-%d', errors='coerce')
+    return db, absen, col_uang
+
+db_df, absen_df, COL_UANG_SHIFT = load_data()
+
+def get_uang_shift(id_kar, shift_code):
+    # STRICT: cuma S2, S3, LS1, LS2 yang dapat
+    if not shift_code: return "0"
+    shift_code = str(shift_code).upper()
+    dapat_shift = False
+    if 'S2' in shift_code: dapat_shift = True
+    if 'S3' in shift_code: dapat_shift = True
+    if 'LS1' in shift_code: dapat_shift = True
+    if 'LS2' in shift_code: dapat_shift = True
+
+    if not dapat_shift: return "0"
+
     try:
-        fmt = "%H:%M"
-        if ":" not in masuk or ":" not in pulang: return 0,0,0
-        m = datetime.strptime(masuk.strip(), fmt)
-        p = datetime.strptime(pulang.strip(), fmt)
-        if p < m: p += timedelta(days=1)
-        total = (p - m).total_seconds()/3600 - 1 # -1 jam istirahat
-        
-        is_sabtu = tgl.weekday() == 5
-        efektif = 5 if is_sabtu else 7
-        
-        if total <= efektif:
-            return efektif if total>0 else 0, 0, 0, 0 # jam kerja, lembur total, l1.5, l2.0
-        
-        lembur = total - efektif
-        if is_sabtu:
-            # Sabtu full x2
-            return efektif, lembur, 0, lembur
-        else:
-            # Senin-Jumat: jam pertama 1.5, sisanya 2.0
-            l15 = 1 if lembur >= 1 else lembur
-            l20 = max(0, lembur - 1)
-            return efektif, lembur, l15, l20
-    except:
-        return 7,0,0,0
+        val = db_df[db_df['ID KARYAWAN']==id_kar][COL_UANG_SHIFT].values[0]
+        val = str(val).replace('Rp','').replace('.','').replace(',','').strip()
+        if val == '' or val.lower()=='nan': return "0"
+        return val
+    except: return "0"
 
-def to_float(x):
-    try: return float(str(x).replace(',','.').strip())
-    except: return 0
+def bulatkan_ke_jam_pas(dt):
+    if dt.minute >= 30: return dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else: return dt.replace(minute=0, second=0, microsecond=0)
 
-# SIDEBAR
-with st.sidebar:
-    menu = st.radio("MENU", ["📅 ABSEN", "💰 GAJI", "🔧 ADMIN EDIT"])
+def cek_keterangan_dari_tanggal(tanggal_dt, jam_masuk_str="", jam_pulang_str="", jam_kerja_float=0, status="H"):
+    tgl_str = tanggal_dt.strftime('%Y-%m-%d')
+    weekday = tanggal_dt.weekday()
+    if tgl_str in LIBUR_NASIONAL: return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
+    if jam_masuk_str and jam_pulang_str and jam_masuk_str!= jam_pulang_str and jam_kerja_float > 0: return "MASUK"
+    if jam_kerja_float == 0:
+        if status == 'L': return "SHIFT LIBUR"
+        elif status == 'A': return "ALFA"
+        elif status == 'I': return "IZIN"
+        elif status == 'S': return "SAKIT"
+        elif status == 'C': return "CUTI"
+        elif status == 'TL': return "TUKAR LIBUR"
+        elif status == 'GH': return "GANTI HARI"
+        elif status == 'GHS': return "GANTI HARI SABTU"
+        elif weekday == 6: return "LIBUR MINGGU"
+        elif weekday == 5: return "SABTU"
+        else: return "TIDAK MASUK"
+    return "HARI KERJA"
 
-if menu == "📅 ABSEN":
-    st.subheader("Input Absen - Cuma Jam Masuk/Pulang")
-    with st.form("absen"):
-        c1,c2 = st.columns(2)
-        with c1:
-            idk = st.selectbox("ID", db_df['ID KARYAWAN'].tolist())
-            tgl = st.date_input("Tanggal", datetime(2026,8,29))
-            shift = st.selectbox("Shift", ["H-S1","H-S2","H-S3","H-LS","T","A"])
-        with c2:
-            jm = st.text_input("Jam Masuk (07:02)", "07:00")
-            jp = st.text_input("Jam Pulang (16:30)", "15:00")
-        if st.form_submit_button("SIMPAN", type="primary", use_container_width=True):
-            jk, jl, l15, l20 = hitung_split(tgl, jm, jp)
-            st.info(f"Hasil: Kerja {jk} jam | Lembur {jl} jam -> 1.5x={l15} jam, 2.0x={l20} jam")
-            ws_absen.append_row([idk, str(tgl), jm, jp, jk, jl, l15, l20, shift])
-            st.success("✅ Kesimpan! Cek di Google Sheet, udah gak 120:00:00 lagi")
-            st.cache_data.clear()
+def cek_shift(jam_masuk_dt, jam_pulang_dt, jam_kerja_float, keterangan, status):
+    if 'LIBUR' in keterangan: return 'SL'
+    if status in ['A','I','S','C','TL']: return status
+    if jam_kerja_float == 0: return '-'
+    jam_masuk = jam_masuk_dt.hour
+    if jam_masuk >= 19: return f"{status}-LS2"
+    if jam_kerja_float >= 11.5: shift_code = 'LS1'
+    else:
+        if 7 <= jam_masuk < 15: shift_code = 'S1'
+        elif 15 <= jam_masuk < 23: shift_code = 'S2'
+        else: shift_code = 'S3'
+    if keterangan == "MASUK": return f"{status}-{shift_code}"
+    else: return shift_code
 
-elif menu == "🔧 ADMIN EDIT":
-    st.subheader("Benerin data yang 120:00:00 di SS mu")
-    if st.button("🔥 HAPUS BARIS 16-17 YANG ERROR 120:00:00", type="primary"):
-        ws_absen.delete_rows(16, 17)
-        st.success("Udah kehapus! Sekarang input ulang tgl 29-08-2026")
-        st.cache_data.clear()
+def hitung(masuk_dt, pulang_dt, status):
+    masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
+    pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
+    total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
+    jam_kerja_float = total_jam_mentah - 1.0 if total_jam_mentah >= 8.0 else total_jam_mentah
+    if jam_kerja_float < 0: jam_kerja_float = 0
+    jam_masuk_str = masuk_dt.strftime('%H:%M:%S')
+    jam_pulang_str = pulang_dt.strftime('%H:%M:%S')
+    keterangan = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_kerja_float, status)
+    shift = cek_shift(masuk_dt, pulang_dt, jam_kerja_float, keterangan, status)
+    lembur_1_5, lembur_2_0 = hitung_lembur_baru(jam_kerja_float)
+    jam_lembur_total = float(lembur_1_5) + float(lembur_2_0)
+    return f"{jam_kerja_float:.2f}", f"{jam_lembur_total:.2f}", lembur_1_5, lembur_2_0, shift, keterangan, jam_masuk_str, jam_pulang_str
 
-else:
-    # GAJI
-    bulan = st.selectbox("Bulan", range(1,13), index=7)
-    idp = st.selectbox("Karyawan", db_df['ID KARYAWAN'].tolist())
-    if st.button("HITUNG GAJI + LEMBUR X1.5 X2", type="primary", use_container_width=True):
-        absen_bulan = absen_df[(absen_df['TANGGAL'].dt.month==bulan)].copy()
-        data_kar = absen_bulan[absen_bulan['ID KARYAWAN']==idp].copy()
-        
-        l15_tot = 0; l20_tot = 0
-        for _,r in data_kar.iterrows():
-            if pd.isna(r['TANGGAL']): continue
-            jk, jl, l15, l20 = hitung_split(r['TANGGAL'], str(r.get('JAM MASUK','')), str(r.get('JAM PULANG','')))
-            l15_tot += l15; l20_tot += l20
+def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=False):
+    id_kar = id_kar.zfill(8)
+    tgl_str = masuk_dt.strftime('%Y-%m-%d')
+    STATUS_NON_JAM = ['A','I','S','C','L','GH','GHS','TL']
+    if status in STATUS_NON_JAM:
+        jam_masuk_str = ""; jam_pulang_str = ""; jam_kerja = "0.00"; jam_lembur = "0.00"; l1, l2 = "0.00", "0.00"
+        shift = 'SL' if masuk_dt.strftime('%Y-%m-%d') in LIBUR_NASIONAL else status
+        ket = cek_keterangan_dari_tanggal(masuk_dt, "", "", 0, status)
+    elif not sudah_pulang:
+        jam_masuk_str = masuk_dt.strftime('%H:%M:%S'); jam_pulang_str = ""; jam_kerja = "0.00"; jam_lembur = "0.00"; l1, l2 = "0.00", "0.00"
+        shift = "-"; ket = "BELUM ABSEN PULANG"
+    else:
+        jam_kerja, jam_lembur, l1, l2, shift, ket, jam_masuk_str, jam_pulang_str = hitung(masuk_dt, pulang_dt, status)
 
-        gaji = 5252909
-        rate = gaji/173
-        total_lembur = (l15_tot*rate*1.5) + (l20_tot*rate*2.0)
-        st.metric("Total Lembur 1.5x", f"{l15_tot} jam")
-        st.metric("Total Lembur 2.0x (Sabtu 5 jam)", f"{l20_tot} jam")
-        st.metric("Uang Lembur", f"Rp {int(total_lembur):,}")
-        st.caption(f"Rumus: ({l15_tot} x {int(rate)} x 1.5) + ({l20_tot} x {int(rate)} x 2.0)")
+    uang_shift = get_uang_shift(id_kar, shift)
+    row_data = [id_kar, nama, tgl_str, jam_masuk_str, jam_pulang_str, jam_kerja, jam_lembur, l1, l2, shift, ket, status, uang_shift]
+    existing = absen_df[(absen_df['ID KARYAWAN'] == id_kar) & (absen_df['TANGGAL'] == tgl_str)]
+    if not existing.empty:
+        row_num = existing.index[0] + 2
+        ws_absen.update(f'A{row_num}:M{row_num}', [row_data])
+    else:
+        ws_absen.insert_row(row_data, 2)
+    load_data.clear()
+
+def generate_dan_rapikan_sheet(id_kar_pilih, tgl_awal, tgl_akhir):
+    all_values = ws_absen.get_all_values()
+    df = pd.DataFrame(all_values[1:], columns=HEADER) if len(all_values) > 1 else pd.DataFrame(columns=HEADER)
+    rows_to_add = []
+    date_range = pd.date_range(start=tgl_awal, end=tgl_akhir)
+    nama_kar = db_df[db_df['ID KARYAWAN']==id_kar_pilih]['NAMA KARYAWAN'].values[0]
+    for tgl in date_range:
+        tgl_str = tgl.strftime('%Y-%m-%d')
+        ada = df[(df['ID KARYAWAN'] == id_kar_pilih) & (df['TANGGAL'] == tgl_str)]
+        if ada.empty:
+            if tgl_str in LIBUR_NASIONAL: ket = f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"; shift = "SL"; status = "L"
+            else: ket = "TIDAK MASUK"; shift = "-"; status = "A"
+            uang_shift = get_uang_shift(id_kar_pilih, shift)
+            row_data = [id_kar_pilih, nama_kar, tgl_str, "", "", "0.00", "0.00", "0.00", "0.00", shift, ket, status, uang_shift]
+            rows_to_add.append(row_data)
+    if rows_to_add: ws_absen.append_rows(rows_to_add, value_input_option='RAW')
+    load_data.clear()
+    db_reload, df_reload, _ = load_data()
+    df_reload['UANG SHIFT'] = df_reload.apply(lambda x: get_uang_shift(x['ID KARYAWAN'], x['SHIFT']), axis=1)
+    df_reload = df_reload.sort_values(['ID KARYAWAN', 'TGL_DT'], ascending=[True, False])
+    df_reload = df_reload.drop(columns=['TGL_DT'])
+    df_reload = df_reload.astype(str).fillna("").replace('nan','').replace('NaT','')
+    values_to_update = [HEADER] + df_reload.values.tolist()
+    ws_absen.clear()
+    ws_absen.update(values_to_update, value_input_option='RAW')
+    return len(rows_to_add)
+
+menu = st.tabs(["📝 ABSEN", "✏️ EDIT DATA", "⚙️ ADMIN", "📊 REKAP"])
+with menu[0]:
+    id_in = st.text_input("Masukkan ID Karyawan", key="id_absen").strip().zfill(8)
+    nama = ""
+    if id_in:
+        if id_in in db_df['ID KARYAWAN'].values:
+            nama = db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
+            st.success(f"✅ Nama: {nama} | Uang Shift: {db_df[db_df['ID KARYAWAN']==id_in][COL_UANG_SHIFT].values[0]}")
+        else: st.error(f"ID {id_in} tidak ada")
+    tgl = st.date_input("Tanggal Absen", datetime.now(), key="tgl_absen")
+    tgl_str = tgl.strftime('%Y-%m-%d')
+    data_hari_ini = pd.DataFrame()
+    if id_in and not absen_df.empty: data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TANGGAL'] == tgl_str)]
+    with st.expander("⚙️ Ubah Status Khusus: GH, GHS, TL, I, S, C, A"):
+        DAFTAR_STATUS_ABSEN = {"H": "H - HADIR NORMAL", "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU", "TL": "TL - TUKAR LIBUR", "I": "I - IZIN", "S": "S - SAKIT", "C": "C - CUTI", "A": "A - ALFA"}
+        status_pilih = st.selectbox("Pilih Status Khusus", options=list(DAFTAR_STATUS_ABSEN.keys()), format_func=lambda x: DAFTAR_STATUS_ABSEN[x], index=0, key="status_absen")
+        if status_pilih!= "H":
+            if st.button(f"SIMPAN STATUS {status_pilih}", use_container_width=True, type="primary", key="btn_status"):
+                upsert_absen(id_in, datetime.combine(tgl, datetime.now().time()), datetime.combine(tgl, datetime.now().time()), nama, status_pilih)
+                st.balloons(); st.success(f"✅ Status {DAFTAR_STATUS_ABSEN[status_pilih]} berhasil disimpan"); st.rerun()
+    sudah_masuk = False; sudah_pulang = False; jam_masuk_lama = ""
+    if not data_hari_ini.empty:
+        data = data_hari_ini.iloc[0]; jam_masuk_lama = data['JAM MASUK']
+        if data['JAM MASUK']!= "": sudah_masuk = True
+        if data['JAM PULANG']!= "": sudah_pulang = True
+    col1, col2 = st.columns(2)
+    with col1:
+        jam_masuk = st.time_input("Jam Masuk", datetime.now().time(), key="jam_masuk_absen")
+        if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama, key="btn_masuk"):
+            if sudah_masuk: st.warning(f"⚠️ Sudah Absen Masuk jam {jam_masuk_lama}")
+            else:
+                masuk_dt = datetime.combine(tgl, jam_masuk)
+                upsert_absen(id_in, masuk_dt, masuk_dt, nama, "H", sudah_pulang=False)
+                st.balloons(); st.success(f"✅ ABSEN MASUK BERHASIL!"); st.rerun()
+    with col2:
+        jam_pulang = st.time_input("Jam Pulang", datetime.now().time(), key="jam_pulang_absen")
+        if st.button("🔴 ABSEN PULANG", use_container_width=True, type="secondary", disabled=not nama, key="btn_pulang"):
+            if not sudah_masuk: st.error("⚠️ Belum Absen Masuk. Silahkan absen masuk dulu")
+            elif sudah_pulang: st.warning(f"⚠️ Sudah Absen Pulang jam {data['JAM PULANG']}")
+            else:
+                masuk_dt = datetime.combine(tgl, datetime.strptime(jam_masuk_lama, '%H:%M:%S').time())
+                pulang_dt = datetime.combine(tgl, jam_pulang)
+                upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H", sudah_pulang=True)
+                st.balloons(); st.success(f"✅ ABSEN PULANG BERHASIL!"); st.rerun()
+
+with menu[1]:
+    if "login" not in st.session_state: st.session_state.login = False
+    if not st.session_state.login:
+        pw = st.text_input("Password Admin", type="password", key="pw_edit")
+        if st.button("LOGIN", key="btn_login"):
+            if pw == PASSWORD_ADMIN: st.session_state.login = True; st.rerun()
+            else: st.error("Password Salah")
+    else:
+        if st.button("LOGOUT", key="btn_logout"): st.session_state.login = False; st.rerun()
+        id_edit = st.text_input("ID yg mau diedit", key="id_edit").strip().zfill(8)
+        if id_edit in db_df['ID KARYAWAN'].values:
+            data_kar = absen_df[absen_df['ID KARYAWAN']==id_edit]
+            if not data_kar.empty:
+                opsi_tgl = data_kar.sort_values('TGL_DT', ascending=False)['TANGGAL'].tolist()
+                pilih = st.selectbox("Pilih Tanggal Data", opsi_tgl, key="pilih_tgl_edit")
+                row = data_kar[data_kar['TANGGAL']==pilih].iloc[0]
+                col1, col2 = st.columns(2)
+                with col1:
+                    tgl_edit = st.date_input("Tanggal", pd.to_datetime(row['TANGGAL']), key="tgl_edit")
+                    jam_masuk_edit = st.time_input("Jam Masuk", datetime.strptime(row['JAM MASUK'], '%H:%M:%S').time() if row['JAM MASUK'] else datetime.now().time(), key="jam_masuk_edit")
+                with col2:
+                    jam_pulang_edit = st.time_input("Jam Pulang", datetime.strptime(row['JAM PULANG'], '%H:%M:%S').time() if row['JAM PULANG'] else datetime.now().time(), key="jam_pulang_edit")
+                DAFTAR_STATUS_EDIT = {"H": "H - HADIR", "GH": "GH - GANTI HARI", "GHS": "GHS - GANTI HARI SABTU", "TL": "TL - TUKAR LIBUR", "A": "A - ALFA", "I": "I - IZIN", "S": "S - SAKIT", "C": "C - CUTI", "L": "L - LIBUR"}
+                kode_pilih = st.selectbox("Ubah Status Menjadi", options=list(DAFTAR_STATUS_EDIT.keys()), format_func=lambda x: DAFTAR_STATUS_EDIT[x], key="status_edit")
+                if st.button("SIMPAN EDIT", use_container_width=True, type="primary", key="btn_simpan_edit"):
+                    masuk_dt = datetime.combine(tgl_edit, jam_masuk_edit)
+                    pulang_dt = datetime.combine(tgl_edit, jam_pulang_edit)
+                    upsert_absen(id_edit, masuk_dt, pulang_dt, row['NAMA KARYAWAN'], kode_pilih, sudah_pulang=True)
+                    st.success(f"✅ Edit berhasil."); st.rerun()
+
+with menu[2]:
+    st.warning("⚠️ Generate + hitung ulang uang shift S2,S3,LS")
+    id_generate = st.selectbox("Pilih ID Karyawan", options=db_df['ID KARYAWAN'].tolist(), format_func=lambda x: f"{x} - {db_df[db_df['ID KARYAWAN']==x]['NAMA KARYAWAN'].values[0]}", key="id_generate")
+    col1, col2 = st.columns(2)
+    with col1: tgl_awal = st.date_input("Dari Tanggal", datetime(2026,8,16), key="tgl_awal")
+    with col2: tgl_akhir = st.date_input("Sampai Tanggal", datetime(2026,8,28), key="tgl_akhir")
+    if st.button("🔄 GENERATE & URUTKAN DATA", type="primary", use_container_width=True, key="btn_update"):
+        with st.spinner("Sedang generate..."):
+            jml = generate_dan_rapikan_sheet(id_generate, tgl_awal, tgl_akhir)
+        st.success(f"✅ Selesai! {jml} data baru. Uang shift otomatis ke-update")
+
+with menu[3]: st.dataframe(absen_df, use_container_width=True, height=600)
