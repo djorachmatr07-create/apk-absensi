@@ -3,8 +3,8 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="GAJI", layout="wide")
-st.title("💰 GAJI V1.4 - FIX 13 HARI")
+st.set_page_config(page_title="GAJI LENGKAP", layout="wide")
+st.title("💰 HITUNG GAJI LENGKAP V2")
 
 @st.cache_resource
 def connect():
@@ -20,64 +20,111 @@ ws_absen, ws_db, ws_gaji = connect()
 def load():
     db = pd.DataFrame(ws_db.get_all_records())
     db['ID KARYAWAN'] = db['ID KARYAWAN'].astype(str).str.zfill(8)
+    # Biar semua angka kebaca
+    for col in db.columns:
+        db[col] = db[col].astype(str)
+
     absen = pd.DataFrame(ws_absen.get_all_records())
-    absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
-    absen['TANGGAL'] = pd.to_datetime(absen['TANGGAL'], errors='coerce')
+    if not absen.empty:
+        absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
+        absen['TANGGAL'] = pd.to_datetime(absen['TANGGAL'], errors='coerce')
     return db, absen
 
 db_df, absen_df = load()
 
+def to_float(x):
+    try:
+        x = str(x).replace('Rp','').replace('.','').replace(',','.').strip()
+        if x == '' or x.lower() == 'nan': return 0
+        f = float(x)
+        if f < 5000 and f!=0: f = f # biarin, nanti yg shift aja yg dikali
+        return f
+    except: return 0
+
 bulan = st.selectbox("Bulan", range(1,13), index=7)
 tahun = st.number_input("Tahun", value=2026)
 
-if st.button("🔍 HITUNG GAJI + CEK DETAIL", type="primary", use_container_width=True):
+# Setting premi & uang makan per hari kalau gak ada di DB
+with st.expander("⚙️ Setting Jika di DATABASE kosong"):
+    default_premi = st.number_input("Default Premi Hadir (jika hadir full)", value=150000)
+    default_makan = st.number_input("Default Uang Makan / Hari", value=25000)
+
+if st.button("🔍 HITUNG GAJI LENGKAP", type="primary", use_container_width=True):
     absen_bulan = absen_df[(absen_df['TANGGAL'].dt.month==bulan) & (absen_df['TANGGAL'].dt.year==tahun)].copy()
     for c in ['LEMBUR 1.5','LEMBUR 2.0']:
         if c in absen_bulan.columns:
             absen_bulan[c] = pd.to_numeric(absen_bulan[c].astype(str).str.replace(',','.'), errors='coerce').fillna(0)
 
     rekap = []
-    for id_kar in db_df['ID KARYAWAN'].unique():
+    for _, kar in db_df.iterrows():
+        id_kar = kar['ID KARYAWAN']
+        nama = kar.get('NAMA KARYAWAN','')
+
         data_kar = absen_bulan[absen_bulan['ID KARYAWAN']==id_kar]
         if data_kar.empty: continue
 
-        # DEBUG: LIHAT DATA ASLI
-        if id_kar == '01213027':
-            st.write("=== DEBUG RACHMAT - DATA MENTAH AGUSTUS ===")
-            st.dataframe(data_kar[['TANGGAL','SHIFT','STATUS']])
-            st.write(f"Total baris ketemu: {len(data_kar)}")
+        # --- AMBIL DARI DATABASE ---
+        gaji_pokok = to_float(kar.get('GAJI BULAN', kar.get('GAJI POKOK', 0)))
+        uang_shift_hari = to_float(kar.get('UANG SHIFT', 0))
+        if uang_shift_hari > 0 and uang_shift_hari < 5000: uang_shift_hari *= 10
+        if uang_shift_hari == 0: uang_shift_hari = 21875
 
-        nama = db_df[db_df['ID KARYAWAN']==id_kar]['NAMA KARYAWAN'].values[0]
-        try:
-            u = str(db_df[db_df['ID KARYAWAN']==id_kar]['UANG SHIFT'].values[0]).replace('.','').replace(',','.')
-            uang_hari = float(u)
-            if uang_hari < 5000: uang_hari *= 10
-        except: uang_hari = 21875
+        premi_db = to_float(kar.get('PREMI HADIR', 0))
+        makan_db = to_float(kar.get('UANG MAKAN', 0))
 
-        # FIX: HARI KERJA = HANYA YANG HADIR (STATUS MENGANDUNG H)
-        # Bukan len() semua
-        data_hadir = data_kar[data_kar['STATUS'].astype(str).str.contains('H', case=False, na=False) | data_kar['SHIFT'].astype(str).str.contains('H-', case=False, na=False)]
-        if len(data_hadir) == 0: # kalau STATUS kosong, anggap semua baris itu hadir (buat data lama)
-            data_hadir = data_kar
+        # --- HITUNG HARI ---
+        # Hari kerja = jumlah hadir (ada TANGGAL)
+        hari_kerja = len(data_kar)
+        # Hari shift = yang S2/S3/LS
+        hari_shift = data_kar['SHIFT'].astype(str).str.contains('S2|S3|LS', case=False, na=False).sum()
 
-        hari_kerja = len(data_hadir)
-        hari_shift = data_hadir['SHIFT'].astype(str).str.contains('S2|S3|LS', case=False, na=False).sum()
-        total_shift = hari_shift * uang_hari
+        # --- HITUNG KOMPONEN ---
+        total_shift = hari_shift * uang_shift_hari
 
-        total_l15 = data_hadir['LEMBUR 1.5'].sum()
-        total_l20 = data_hadir['LEMBUR 2.0'].sum()
-        gaji_bulan = 5252909
-        total_lembur = (total_l15 * gaji_bulan/173 * 1.5) + (total_l20 * gaji_bulan/173 * 2.0)
+        # Uang makan = hari_kerja * uang makan per hari
+        uang_makan_per_hari = makan_db if makan_db!=0 else default_makan
+        total_uang_makan = hari_kerja * uang_makan_per_hari
 
-        rekap.append([id_kar, nama, hari_kerja, hari_shift, uang_hari, total_shift, total_l15, total_l20, total_lembur])
+        # Premi hadir = dapat kalau hadir >= 22 hari (atau full) - kalau gak, 0
+        # Kalau di DB ada nilainya, pakai logika hadir full
+        premi_hadir_db = premi_db if premi_db!=0 else default_premi
+        # Misal premi full kalau hari kerja >= 20
+        total_premi = premi_hadir_db if hari_kerja >= 20 else 0
 
-    df = pd.DataFrame(rekap, columns=['ID','NAMA','HARI KERJA (HADIR)','HARI SHIFT','UANG/HARI','TOTAL SHIFT','L1.5','L2.0','TOTAL LEMBUR'])
+        # Lembur
+        total_l15 = data_kar['LEMBUR 1.5'].sum() if 'LEMBUR 1.5' in data_kar.columns else 0
+        total_l20 = data_kar['LEMBUR 2.0'].sum() if 'LEMBUR 2.0' in data_kar.columns else 0
+        rate = gaji_pokok / 173 if gaji_pokok!=0 else 0
+        total_lembur = (total_l15 * rate * 1.5) + (total_l20 * rate * 2.0)
+
+        total_gaji = gaji_pokok + total_premi + total_uang_makan + total_shift + total_lembur
+
+        rekap.append([
+            id_kar, nama, int(gaji_pokok), int(hari_kerja), int(total_premi),
+            int(total_uang_makan), int(total_shift), int(total_lembur), int(total_gaji),
+            int(hari_shift), float(total_l15), float(total_l20)
+        ])
+
+    df = pd.DataFrame(rekap, columns=[
+        'ID KARYAWAN','NAMA KARYAWAN','GAJI POKOK','HARI KERJA','PREMI HADIR','UANG MAKAN','UANG SHIFT','UANG LEMBUR','TOTAL GAJI',
+        'HARI SHIFT','L1.5','L2.0'
+    ])
     st.dataframe(df, use_container_width=True)
-    st.session_state['df'] = df
+    st.session_state['df_lengkap'] = df
 
-if 'df' in st.session_state:
-    if st.button("💾 SIMPAN"):
-        df = st.session_state['df']
+    # Ringkasan
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Total Gaji Pokok", f"Rp {df['GAJI POKOK'].sum():,.0f}")
+    c2.metric("Total Premi", f"Rp {df['PREMI HADIR'].sum():,.0f}")
+    c3.metric("Total Makan", f"Rp {df['UANG MAKAN'].sum():,.0f}")
+    c4.metric("TOTAL SEMUA", f"Rp {df['TOTAL GAJI'].sum():,.0f}")
+
+if 'df_lengkap' in st.session_state:
+    if st.button("💾 SIMPAN KE DATA GAJI", type="primary"):
+        df = st.session_state['df_lengkap']
+        # Simpan sesuai urutan header di SS kamu: ID, NAMA, GAJI POKOK, HARI KERJA, PREMI HADIR, UANG MAKAN, UANG SHIFT, UANG LEMBUR, TOTAL GAJI
+        df_simpan = df[['ID KARYAWAN','NAMA KARYAWAN','GAJI POKOK','HARI KERJA','PREMI HADIR','UANG MAKAN','UANG SHIFT','UANG LEMBUR','TOTAL GAJI']]
         ws_gaji.clear()
-        ws_gaji.update([df.columns.tolist()] + df.astype(str).values.tolist())
-        st.success("Berhasil!")
+        ws_gaji.update([df_simpan.columns.tolist()] + df_simpan.astype(str).values.tolist())
+        st.balloons()
+        st.success(f"✅ Berhasil simpan {len(df_simpan)} karyawan ke DATA GAJI")
