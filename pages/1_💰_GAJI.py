@@ -2,7 +2,7 @@ import streamlit as st, gspread, pandas as pd
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
-st.title("💰 GAJI V9 - VERTIKAL FIX ERROR")
+st.title("💰 GAJI V10 - FIX ERROR TOTAL")
 
 @st.cache_resource
 def connect():
@@ -36,18 +36,16 @@ if st.button("🔍 HITUNG SLIP VERTIKAL", type="primary", use_container_width=Tr
     absen_bulan = absen_df[(absen_df['TANGGAL'].dt.month==bulan) & (absen_df['TANGGAL'].dt.year==tahun)].copy()
     kar = db_df[db_df['ID KARYAWAN']==id_pilih].iloc[0]
     data_kar = absen_bulan[absen_bulan['ID KARYAWAN']==id_pilih]
-
-    # HADIR ONLY + UNIK
     data_hadir = data_kar[data_kar['STATUS'].astype(str).str.upper()=='H']
     data_unik = data_hadir.drop_duplicates('TANGGAL')
     hari_kerja = len(data_unik)
     hari_shift = data_unik['SHIFT'].astype(str).str.contains('S2|S3|LS', case=False, na=False).sum()
 
     gaji_pokok = to_float(kar['GAJI BULAN'])
-    u_shift = 2187.5 # KUNCI
+    u_shift = 2187.5
     u_makan = to_float(kar['UANG MAKAN'])
     premi = to_float(kar['PREMI HADIR'])
-    loyal = to_float(kar['LOYALITAS']) # PER BULAN
+    loyal = to_float(kar['LOYALITAS'])
 
     jkk = gaji_pokok * 0.0024
     jkm = gaji_pokok * 0.0030
@@ -60,52 +58,50 @@ if st.button("🔍 HITUNG SLIP VERTIKAL", type="primary", use_container_width=Tr
 
     total_shift = hari_shift * u_shift
     total_makan = hari_kerja * u_makan
-
-    # KETERANGAN TOTAL
     total_pendapatan = gaji_pokok + premi + loyal + total_makan + total_shift + jkk + jkm + jht_prsh + jp_prsh + bpjs_kes_prsh
     total_potongan = jht_tk + jp_tk + bpjs_kes_kar
     gaji_bersih = total_pendapatan - total_potongan
 
     slip = [
         ["ID KARYAWAN", id_pilih, ""],
-        ["NAMA KARYAWAN", kar['NAMA KARYAWAN'], ""],
-        ["PERIODE", f"{bulan}/{tahun}", f"Hadir {hari_kerja} hari"],
+        ["NAMA", kar['NAMA KARYAWAN'], ""],
+        ["PERIODE", f"{bulan}/{tahun}", f"{hari_kerja} hari hadir"],
         ["", "", ""],
-        ["HARI KERJA (HADIR ONLY)", hari_kerja, "Jumlah tanggal unik STATUS=H"],
-        ["HARI SHIFT (S2/S3)", hari_shift, f"{hari_shift} x {u_shift}"],
+        ["HARI KERJA (H ONLY)", hari_kerja, "STATUS=H & tanggal unik"],
+        ["HARI SHIFT", hari_shift, "S2/S3/LS"],
         ["", "", ""],
-        ["=== PENDAPATAN ===", "", ""],
-        ["GAJI POKOK", int(gaji_pokok), "Gaji bulan tetap"],
-        ["PREMI HADIR", int(premi), "Premi hadir per bulan"],
-        ["LOYALITAS", int(loyal), "Loyalitas per bulan (flat)"],
-        ["TOTAL UANG MAKAN", int(total_makan), f"{hari_kerja} hari x {int(u_makan)}"],
-        ["TOTAL UANG SHIFT", int(total_shift), f"{hari_shift} x 2187.5"],
-        ["JKK (0.24% x Gaji Pokok)", int(jkk), f"{gaji_pokok} x 0.24%"],
-        ["JKM (0.30% x Gaji Pokok)", int(jkm), f"{gaji_pokok} x 0.30%"],
-        ["JHT Perusahaan (3.7%)", int(jht_prsh), f"{gaji_pokok} x 3.7%"],
-        ["JP Perusahaan (2%)", int(jp_prsh), f"{gaji_pokok} x 2%"],
-        ["BPJS Kes Perusahaan (4%)", int(bpjs_kes_prsh), f"{gaji_pokok} x 4%"],
+        ["=== PENDAPATAN ===", "", "KETERANGAN"],
+        ["GAJI POKOK", int(gaji_pokok), "Tetap bulanan"],
+        ["PREMI HADIR", int(premi), "Per bulan"],
+        ["LOYALITAS", int(loyal), "Per bulan flat"],
+        ["TOTAL MAKAN", int(total_makan), f"{hari_kerja} x {int(u_makan)}"],
+        ["TOTAL SHIFT", int(total_shift), f"{hari_shift} x 2187.5"],
+        ["JKK 0.24%", int(jkk), "0.24% x Gaji Pokok - Perusahaan"],
+        ["JKM 0.30%", int(jkm), "0.30% x Gaji Pokok - Perusahaan"],
+        ["JHT Prsh 3.7%", int(jht_prsh), "3.7% x Gaji Pokok - Perusahaan"],
+        ["JP Prsh 2%", int(jp_prsh), "2% x Gaji Pokok - Perusahaan"],
+        ["BPJS Kes Prsh 4%", int(bpjs_kes_prsh), "4% x Gaji Pokok - Perusahaan"],
         ["", "", ""],
-        ["TOTAL PENDAPATAN", int(total_pendapatan), "Gaji Pokok + Tunjangan + BPJS Prsh"],
+        ["TOTAL PENDAPATAN", int(total_pendapatan), "= Gaji Pokok + Premi + Loyalitas + Makan + Shift + (JKK+JKM+JHT Prsh+JP Prsh+BPJS Prsh)"],
         ["", "", ""],
-        ["=== POTONGAN ===", "", ""],
-        ["JHT TK (2%)", int(jht_tk), f"{gaji_pokok} x 2% - Ditanggung Karyawan"],
-        ["JP TK (1%)", int(jp_tk), f"{gaji_pokok} x 1% - Ditanggung Karyawan"],
-        ["BPJS Kes Karyawan (1%)", int(bpjs_kes_kar), f"{gaji_pokok} x 1% - Ditanggung Karyawan"],
-        ["TOTAL POTONGAN", int(total_potongan), "JHT TK + JP TK + BPJS Kes Kar"],
+        ["=== POTONGAN ===", "", "KETERANGAN"],
+        ["JHT TK 2%", int(jht_tk), "2% x Gaji Pokok - Potong Karyawan"],
+        ["JP TK 1%", int(jp_tk), "1% x Gaji Pokok - Potong Karyawan"],
+        ["BPJS Kes Kar 1%", int(bpjs_kes_kar), "1% x Gaji Pokok - Potong Karyawan"],
+        ["TOTAL POTONGAN", int(total_potongan), "= JHT TK + JP TK + BPJS Kes Kar = 4% x Gaji Pokok"],
         ["", "", ""],
-        ["GAJI BERSIH (TAKE HOME PAY)", int(gaji_bersih), "Total Pendapatan - Total Potongan"],
+        ["GAJI BERSIH / THP", int(gaji_bersih), "= TOTAL PENDAPATAN - TOTAL POTONGAN"],
     ]
-
-    df = pd.DataFrame(slip, columns=["KOMPONEN (KOLOM A)", "NILAI (KOLOM B)", "KETERANGAN (KOLOM C)"])
+    df = pd.DataFrame(slip, columns=["KOMPONEN (A)", "NILAI (B)", "KETERANGAN (C)"])
     st.dataframe(df, use_container_width=True, height=700)
     st.session_state['df_final'] = df
+    st.success(f"TOTAL PENDAPATAN: Rp {int(total_pendapatan):,} | TOTAL POTONGAN: Rp {int(total_potongan):,} | BERSIH: Rp {int(gaji_bersih):,}")
 
 if 'df_final' in st.session_state:
-    if st.button("💾 SIMPAN VERTIKAL KE DATA GAJI", type="primary"):
+    if st.button("💾 SIMPAN VERTIKAL", type="primary"):
         df = st.session_state['df_final']
-        # FIX ERROR UTAMA DI SINI - PAKAI range_name
+        data_simpan = [df.columns.tolist()] + df.astype(str).values.tolist()
         ws_gaji.clear()
-        ws_gaji.update(range_name="A1", values=[df.columns.tolist()] + df.values.tolist())
+        ws_gaji.update("A1", data_simpan, value_input_option="USER_ENTERED")
         st.balloons()
-        st.success(f"✅ BERHASIL DISIMPAN! Cek Sheet DATA GAJI - Udah format A=Komponen, B=Nilai, C=Keterangan. Total Pendapatan & Potongan udah ada keterangannya min!")
+        st.success("✅ BERHASIL! Format: Kolom A=Komponen, B=Nilai, C=Keterangan Total. Cek Sheet DATA GAJI!")
