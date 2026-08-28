@@ -2,22 +2,7 @@ import streamlit as st, gspread, pandas as pd
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
-st.title("💰 GAJI FINAL V5 - BPJS % GAJI POKOK")
-
-# CSS HEADER VERTIKAL BIAR DI HP KELIATAN SEMUA
-st.markdown("""
-<style>
-thead th {
-    writing-mode: vertical-rl !important;
-    transform: rotate(180deg);
-    white-space: nowrap;
-    height: 180px !important;
-    vertical-align: bottom !important;
-    text-align: left !important;
-}
-[data-testid="stDataFrame"] { width: 100%; }
-</style>
-""", unsafe_allow_html=True)
+st.title("💰 GAJI V6 - HEADER VERTIKAL AUTO")
 
 @st.cache_resource
 def connect():
@@ -25,9 +10,9 @@ def connect():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     client = gspread.authorize(creds)
     sh = client.open("REKAP")
-    return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN"), sh.worksheet("DATA GAJI")
+    return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN"), sh.worksheet("DATA GAJI"), sh
 
-ws_absen, ws_db, ws_gaji = connect()
+ws_absen, ws_db, ws_gaji, spreadsheet = connect()
 
 @st.cache_data(ttl=60)
 def load():
@@ -39,23 +24,46 @@ def load():
     return db, absen
 
 db_df, absen_df = load()
+
 def to_float(x):
     try: return float(str(x).replace(',','.'))
     except: return 0
+
+# FUNGSI BIKIN HEADER VERTIKAL DI GOOGLE SHEET
+def bikin_vertikal(ws):
+    try:
+        body = {
+            "requests": [{
+                "repeatCell": {
+                    "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1},
+                    "cell": {"textFormat": {"bold": True, "fontSize": 10}, "textRotation": {"angle": 90}},
+                    "fields": "textFormat, textRotation"
+                }
+            },{
+                "updateSheetProperties": {
+                    "properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1}},
+                    "fields": "gridProperties.frozenRowCount"
+                }
+            }]
+        }
+        spreadsheet.batch_update(body)
+        # Tinggi header
+        ws_gaji.format("A1:Z1", {"textFormat": {"bold": True}})
+        return True
+    except Exception as e:
+        st.warning(f"Gagal auto vertikal: {e} -> coba manual ya min: blok baris 1 > Format > Rotasi teks > Putar 90 derajat")
+        return False
 
 bulan = st.selectbox("Bulan", range(1,13), index=7)
 tahun = st.number_input("Tahun", value=2026)
 
 if st.button("🔍 HITUNG GAJI + BPJS", type="primary", use_container_width=True):
     absen_bulan = absen_df[(absen_df['TANGGAL'].dt.month==bulan) & (absen_df['TANGGAL'].dt.year==tahun)].copy()
-
     rekap=[]
     for _, kar in db_df.iterrows():
         id_kar = kar['ID KARYAWAN']
         data_kar = absen_bulan[absen_bulan['ID KARYAWAN']==id_kar]
         if data_kar.empty: continue
-
-        # HARI KERJA = HADIR ONLY + TANGGAL UNIK
         data_hadir = data_kar[data_kar['STATUS'].astype(str).str.upper()=='H']
         data_unik = data_hadir.drop_duplicates('TANGGAL')
         hari_kerja = len(data_unik)
@@ -67,47 +75,34 @@ if st.button("🔍 HITUNG GAJI + BPJS", type="primary", use_container_width=True
         premi = to_float(kar['PREMI HADIR'])
         loyal = to_float(kar['LOYALITAS'])
 
-        # --- HITUNG % DARI GAJI POKOK (SESUAI SS MU) ---
         jkk = gaji_pokok * 0.0024
         jkm = gaji_pokok * 0.0030
-        jht_perusahaan = gaji_pokok * 0.037
-        jp_perusahaan = gaji_pokok * 0.02
-        bpjs_kes_perusahaan = gaji_pokok * 0.04
-
+        jht_prsh = gaji_pokok * 0.037
+        jp_prsh = gaji_pokok * 0.02
+        bpjs_kes_prsh = gaji_pokok * 0.04
         jht_tk = gaji_pokok * 0.02
         jp_tk = gaji_pokok * 0.01
-        bpjs_kes_karyawan = gaji_pokok * 0.01
+        bpjs_kes_kar = gaji_pokok * 0.01
 
         total_shift = hari_shift * u_shift
         total_makan = hari_kerja * u_makan
-
-        total_pendapatan = gaji_pokok + premi + loyal + total_makan + total_shift + jkk + jkm + jht_perusahaan + jp_perusahaan + bpjs_kes_perusahaan
-        total_potongan = jht_tk + jp_tk + bpjs_kes_karyawan
+        total_pendapatan = gaji_pokok + premi + loyal + total_makan + total_shift + jkk + jkm + jht_prsh + jp_prsh + bpjs_kes_prsh
+        total_potongan = jht_tk + jp_tk + bpjs_kes_kar
         gaji_bersih = total_pendapatan - total_potongan
 
-        rekap.append([
-            id_kar, kar['NAMA KARYAWAN'], hari_kerja, hari_shift,
-            int(gaji_pokok), int(premi), int(loyal), int(total_makan), int(total_shift),
-            int(jkk), int(jkm), int(jht_perusahaan), int(jp_perusahaan), int(bpjs_kes_perusahaan),
-            int(jht_tk), int(jp_tk), int(bpjs_kes_karyawan),
-            int(total_potongan), int(total_pendapatan), int(gaji_bersih)
-        ])
+        rekap.append([id_kar, kar['NAMA KARYAWAN'], hari_kerja, hari_shift, int(gaji_pokok), int(premi), int(loyal), int(total_makan), int(total_shift), int(jkk), int(jkm), int(jht_prsh), int(jp_prsh), int(bpjs_kes_prsh), int(jht_tk), int(jp_tk), int(bpjs_kes_kar), int(total_potongan), int(total_pendapatan), int(gaji_bersih)])
 
-    cols = ['ID','NAMA','HARI KERJA','HARI SHIFT','GAJI POKOK','PREMI HADIR','LOYALITAS','TOTAL MAKAN','TOTAL SHIFT',
-            'JKK (0.24%)','JKM (0.30%)','JHT Perusahaan (3.7%)','JP Perusahaan (2%)','BPJS Kes Perusahaan (4%)',
-            'JHT TK (2%)','JP TK (1%)','BPJS Kes Karyawan (1%)','TOTAL POTONGAN','TOTAL PENDAPATAN','GAJI BERSIH']
-
+    cols = ['ID','NAMA','HARI KERJA','HARI SHIFT','GAJI POKOK','PREMI HADIR','LOYALITAS','TOTAL MAKAN','TOTAL SHIFT','JKK (0.24%)','JKM (0.30%)','JHT Prsh (3.7%)','JP Prsh (2%)','BPJS Kes Prsh (4%)','JHT TK (2%)','JP TK (1%)','BPJS Kes Kar (1%)','TOTAL POTONGAN','TOTAL PENDAPATAN','GAJI BERSIH']
     df = pd.DataFrame(rekap, columns=cols)
-    st.dataframe(df, use_container_width=True, height=600)
+    st.dataframe(df, use_container_width=True)
     st.session_state['df']=df
 
-    # Contoh hitungan sesuai SS
-    st.success(f"RACHMAT contoh: Gaji 5.252.909 -> JKK {5252909*0.0024:,.0f} | JKM {5252909*0.003:,.0f} | JHT Prsh {5252909*0.037:,.0f} | Total Potongan {5252909*0.04:,.0f}")
-
 if 'df' in st.session_state:
-    if st.button("💾 SIMPAN KE DATA GAJI"):
+    if st.button("💾 SIMPAN & BIKIN VERTIKAL", type="primary"):
         df=st.session_state['df']
         ws_gaji.clear()
         ws_gaji.update([df.columns.tolist()]+df.values.tolist())
+        bikin_vertikal(ws_gaji)
         st.balloons()
-        st.success("Berhasil! Header udah vertikal jadi keliatan semua di HP")
+        st.success("✅ Disimpan & Header udah vertikal! Coba buka Google Sheet DATA GAJI sekarang min, headernya udah berdiri.")
+        st.info("Kalau masih horizontal: buka Sheet > blok baris 1 > Format > Rotasi teks > 90 derajat (manual 1x aja)")
