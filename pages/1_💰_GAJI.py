@@ -4,7 +4,7 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="GAJI", layout="wide")
-st.title("💰 HITUNG GAJI - FIX UPDATE (TIDAK HAPUS)")
+st.title("💰 GAJI - HARI = HADIR")
 
 @st.cache_resource
 def connect():
@@ -23,13 +23,9 @@ def load():
     absen = pd.DataFrame(ws_absen.get_all_records())
     absen['ID KARYAWAN'] = absen['ID KARYAWAN'].astype(str).str.zfill(8)
     absen['TANGGAL'] = pd.to_datetime(absen['TANGGAL'], errors='coerce')
-    try:
-        gaji = pd.DataFrame(ws_gaji.get_all_records())
-    except:
-        gaji = pd.DataFrame()
-    return db, absen, gaji
+    return db, absen
 
-db_df, absen_df, gaji_df = load()
+db_df, absen_df = load()
 
 bulan = st.selectbox("Bulan", range(1,13), index=7)
 tahun = st.number_input("Tahun", value=2026)
@@ -53,35 +49,26 @@ if st.button("🔍 HITUNG GAJI", type="primary", use_container_width=True):
             if uang_hari < 5000: uang_hari *= 10
         except: uang_hari = 21875
 
-        jml_hari = data_kar['SHIFT'].astype(str).str.contains('S2|S3|LS', case=False, na=False).sum()
-        total_shift = jml_hari * uang_hari
+        # FIX UTAMA DI SINI MIN
+        hari_kerja = len(data_kar) # JUMLAH HADIR
+        hari_shift = data_kar['SHIFT'].astype(str).str.contains('S2|S3|LS', case=False, na=False).sum()
+        total_shift = hari_shift * uang_hari
+
         total_l15 = data_kar['LEMBUR 1.5'].sum()
         total_l20 = data_kar['LEMBUR 2.0'].sum()
         total_lembur = (total_l15 * gaji_bulan/173 * 1.5) + (total_l20 * gaji_bulan/173 * 2.0)
-        hari_kerja = len(data_kar)
 
-        rekap.append([id_kar, nama, gaji_bulan, hari_kerja, jml_hari, total_shift, total_l15, total_l20, total_lembur])
+        rekap.append([id_kar, nama, hari_kerja, hari_shift, uang_hari, total_shift, total_l15, total_l20, total_lembur])
 
-    df = pd.DataFrame(rekap, columns=['ID KARYAWAN','NAMA KARYAWAN','GAJI POKOK','HARI KERJA','HARI SHIFT','TOTAL SHIFT','L1.5','L2.0','TOTAL LEMBUR'])
+    df = pd.DataFrame(rekap, columns=['ID','NAMA','HARI KERJA (HADIR)','HARI SHIFT','UANG/HARI','TOTAL SHIFT','L1.5','L2.0','TOTAL LEMBUR'])
     st.dataframe(df, use_container_width=True)
-    st.session_state['df_hitung'] = df
-    st.success(f"Total: Shift Rp {df['TOTAL SHIFT'].sum():,.0f} | Lembur Rp {df['TOTAL LEMBUR'].sum():,.0f}")
+    st.session_state['df'] = df
+    st.success(f"Hari Kerja dihitung dari HADIR | Total Shift Rp {df['TOTAL SHIFT'].sum():,.0f}")
 
-if 'df_hitung' in st.session_state:
-    if st.button("💾 UPDATE KE SHEET DATA GAJI (TIDAK HAPUS HEADER)"):
-        df = st.session_state['df_hitung']
-        # Ambil header asli biar gak hilang
-        header_asli = ws_gaji.row_values(1)
-        # Kita tulis mulai baris 2
-        # Cocokin kolom
-        data_tulis = []
-        for _, row in df.iterrows():
-            # Isi sesuai kolom asli: ID, NAMA, GAJI POKOK, HARI KERJA,... UANG MAKAN kosongin, UANG SHIFT, UANG LEMBUR
-            # Asumsi kolom: A=ID, B=NAMA, C=GAJI POKOK, D=HARI KERJA, H=UANG SHIFT, G=UANG LEMBUR - sesuaikan
-            baris = [row['ID KARYAWAN'], row['NAMA KARYAWAN'], row['GAJI POKOK'], row['HARI KERJA'], "", "", row['TOTAL SHIFT'], row['TOTAL LEMBUR']]
-            data_tulis.append(baris)
-
+if 'df' in st.session_state:
+    if st.button("💾 SIMPAN KE DATA GAJI"):
+        df = st.session_state['df']
         ws_gaji.clear()
-        ws_gaji.update([['ID KARYAWAN','NAMA KARYAWAN','GAJI POKOK','HARI KERJA','PREMI HADIR','UANG MAKAN','UANG SHIFT','UANG LEMBUR']] + data_tulis)
+        ws_gaji.update([df.columns.tolist()] + df.astype(str).values.tolist())
         st.balloons()
-        st.success(f"✅ Berhasil update {len(data_tulis)} baris, header asli aman!")
+        st.success("Berhasil!")
