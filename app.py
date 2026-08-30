@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
-st.set_page_config(page_title="APK ABSENSI V10.8.3", layout="wide")
-st.title("📍 APK ABSENSI V10.8.3 - SABTU 5 JAM | LEMBUR 1.5 + 2.0")
+st.set_page_config(page_title="APK ABSENSI V10.8.4 FINAL", layout="wide")
+st.title("📍 APK ABSENSI V10.8.4 FINAL - MINGGU 7 JAM X2.0 | SABTU 5 JAM +1.5+2.0")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -40,42 +40,46 @@ def get_libur_dari_ics():
 LIBUR_NASIONAL = get_libur_dari_ics()
 HEADER = ['ID KARYAWAN', 'NAMA KARYAWAN', 'TANGGAL', 'JAM MASUK', 'JAM PULANG', 'JAM KERJA', 'JAM LEMBUR', 'LEMBUR 1.5', 'LEMBUR 2.0', 'SHIFT', 'KETERANGAN', 'STATUS', 'UANG SHIFT']
 
-# ================= RUMUS LENGKAP =================
-def hitung_lembur_lengkap(jam_total_float, is_sabtu=False):
-    """
-    ATURAN LENGKAP:
-    - Senin-Jumat: efektif 7 jam, Sabtu efektif 5 jam
-    - Jam pertama lembur x1.5, jam berikutnya x2.0
-    """
+# ================= RUMUS LENGKAP FINAL =================
+def hitung_lembur_lengkap(jam_total_float, is_sabtu=False, is_minggu=False, is_tgl_merah=False):
     try: jam_total_float = float(jam_total_float or 0)
     except: jam_total_float = 0.0
-
-    jam_normal = 5.0 if is_sabtu else 7.0
-    lembur_1_5 = 0.0
-    lembur_2_0 = 0.0
-    jam_kerja_efektif = 0.0
-
     if jam_total_float <= 0:
         return "0.00", "0.00", "0.00", "0.00"
 
-    if jam_total_float <= jam_normal:
-        # Belum lembur
-        jam_kerja_efektif = jam_total_float
-    else:
-        # Sudah lembur
-        jam_kerja_efektif = jam_normal
-        sisa = jam_total_float - jam_normal
-
-        # RUMUS: JAM PERTAMA x1.5, BERIKUTNYA x2.0
-        if sisa >= 1.0:
-            lembur_1_5 = 1.0
-            lembur_2_0 = sisa - 1.0
+    # 1. MINGGU & TANGGAL MERAH: 7 JAM EFEKTIF X2.0
+    if is_minggu or is_tgl_merah:
+        if jam_total_float <= 7.0:
+            # Kerja 7 jam di Minggu = 7 jam x2.0
+            return "0.00", f"{jam_total_float:.2f}", "0.00", f"{jam_total_float:.2f}"
         else:
-            lembur_1_5 = sisa
-            lembur_2_0 = 0.0
+            # Lebih dari 7 jam, semua tetap x2.0
+            return "0.00", f"{jam_total_float:.2f}", "0.00", f"{jam_total_float:.2f}"
 
-    jam_lembur_total = lembur_1_5 + lembur_2_0
-    return f"{jam_kerja_efektif:.2f}", f"{jam_lembur_total:.2f}", f"{lembur_1_5:.2f}", f"{lembur_2_0:.2f}"
+    # 2. SABTU: 5 JAM EFEKTIF + 1 JAM X1.5 + SISANYA X2.0
+    if is_sabtu:
+        if jam_total_float <= 5.0:
+            return f"{jam_total_float:.2f}", "0.00", "0.00", "0.00"
+        sisa = jam_total_float - 5.0
+        if sisa >= 1.0:
+            l15 = 1.0
+            l20 = sisa - 1.0
+        else:
+            l15 = sisa
+            l20 = 0.0
+        return "5.00", f"{(l15+l20):.2f}", f"{l15:.2f}", f"{l20:.2f}"
+
+    # 3. SENIN-JUMAT: 7 JAM EFEKTIF + 1 JAM X1.5 + SISANYA X2.0
+    if jam_total_float <= 7.0:
+        return f"{jam_total_float:.2f}", "0.00", "0.00", "0.00"
+    sisa = jam_total_float - 7.0
+    if sisa >= 1.0:
+        l15 = 1.0
+        l20 = sisa - 1.0
+    else:
+        l15 = sisa
+        l20 = 0.0
+    return "7.00", f"{(l15+l20):.2f}", f"{l15:.2f}", f"{l20:.2f}"
 
 @st.cache_data(ttl=60)
 def load_data():
@@ -151,19 +155,23 @@ def cek_shift(jam_masuk_dt, jam_pulang_dt, jam_kerja_float, keterangan, status):
 def hitung(masuk_dt, pulang_dt, status):
     masuk_dt = bulatkan_ke_jam_pas(masuk_dt)
     pulang_dt = bulatkan_ke_jam_pas(pulang_dt)
-    total_jam_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
-    jam_float = total_jam_mentah - 1.0 if total_jam_mentah >= 6.0 else total_jam_mentah
+    if pulang_dt < masuk_dt: pulang_dt += timedelta(days=1)
+    total_mentah = (pulang_dt - masuk_dt).total_seconds() / 3600
+    jam_float = total_mentah - 1.0 if total_mentah >= 6.0 else total_mentah
     if jam_float < 0: jam_float = 0
+
+    tgl_str = masuk_dt.strftime('%Y-%m-%d')
     is_sabtu = masuk_dt.weekday() == 5
+    is_minggu = masuk_dt.weekday() == 6
+    is_merah = tgl_str in LIBUR_NASIONAL
 
     jam_masuk_str = masuk_dt.strftime('%H:%M:%S')
     jam_pulang_str = pulang_dt.strftime('%H:%M:%S')
     ket = cek_keterangan_dari_tanggal(masuk_dt, jam_masuk_str, jam_pulang_str, jam_float, status)
     shift = cek_shift(masuk_dt, pulang_dt, jam_float, ket, status)
 
-    jam_kerja_eff, jam_lembur_tot, l15, l20 = hitung_lembur_lengkap(jam_float, is_sabtu)
-
-    return jam_kerja_eff, jam_lembur_tot, l15, l20, shift, ket, jam_masuk_str, jam_pulang_str
+    jk, jl, l15, l20 = hitung_lembur_lengkap(jam_float, is_sabtu, is_minggu, is_merah)
+    return jk, jl, l15, l20, shift, ket, jam_masuk_str, jam_pulang_str
 
 def upsert_absen(id_kar, masuk_dt, pulang_dt, nama, status="H", sudah_pulang=False):
     id_kar = id_kar.zfill(8)
@@ -199,19 +207,16 @@ with menu[0]:
             st.success(f"✅ {nama}")
         else: st.error("ID tidak ada")
     tgl = st.date_input("Tanggal Absen", datetime.now())
-    tgl_str = tgl.strftime('%Y-%m-%d')
-    data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TANGGAL'] == tgl_str)] if id_in and not absen_df.empty else pd.DataFrame()
+    data_hari_ini = absen_df[(absen_df['ID KARYAWAN'] == id_in) & (absen_df['TANGGAL'] == tgl.strftime('%Y-%m-%d'))] if id_in and not absen_df.empty else pd.DataFrame()
     sudah_masuk = not data_hari_ini.empty and data_hari_ini.iloc[0]['JAM MASUK']!= ""
     jam_masuk_lama = data_hari_ini.iloc[0]['JAM MASUK'] if sudah_masuk else ""
     col1, col2 = st.columns(2)
     with col1:
         jam_masuk = st.time_input("Jam Masuk", datetime.now().time())
         if st.button("🔵 ABSEN MASUK", use_container_width=True, type="primary", disabled=not nama):
-            if sudah_masuk: st.warning(f"Sudah masuk jam {jam_masuk_lama}")
-            else:
-                masuk_dt = datetime.combine(tgl, jam_masuk)
-                upsert_absen(id_in, masuk_dt, masuk_dt, nama, "H", sudah_pulang=False)
-                st.success("ABSEN MASUK OK"); st.rerun()
+            masuk_dt = datetime.combine(tgl, jam_masuk)
+            upsert_absen(id_in, masuk_dt, masuk_dt, nama, "H", sudah_pulang=False)
+            st.success("MASUK OK"); st.rerun()
     with col2:
         jam_pulang = st.time_input("Jam Pulang", datetime.now().time())
         if st.button("🔴 ABSEN PULANG", use_container_width=True, disabled=not nama):
@@ -220,11 +225,11 @@ with menu[0]:
                 masuk_dt = datetime.combine(tgl, datetime.strptime(jam_masuk_lama, '%H:%M:%S').time())
                 pulang_dt = datetime.combine(tgl, jam_pulang)
                 upsert_absen(id_in, masuk_dt, pulang_dt, nama, "H", sudah_pulang=True)
-                st.success("ABSEN PULANG OK - Sabtu auto 5 jam + lembur 1.5/2.0"); st.rerun()
+                st.success("PULANG OK"); st.rerun()
 
 with menu[2]:
-    st.subheader("Fix Data Lama Sabtu 5 Jam")
-    if st.button("🔥 RECALCULATE SEMUA DATA AGUSTUS (Sabtu 5 Jam)", type="primary", use_container_width=True):
+    st.warning("Fix data lama di SS")
+    if st.button("🔥 FIX FINAL MINGGU 7 JAM X2.0 & SABTU 5+1.5+2.0", type="primary", use_container_width=True):
         all_vals = ws_absen.get_all_values()
         for i, row in enumerate(all_vals[1:], start=2):
             try:
@@ -234,12 +239,15 @@ with menu[2]:
                 pulang = datetime.strptime(row[4], '%H:%M:%S')
                 masuk_dt = datetime.combine(tgl, masuk.time())
                 pulang_dt = datetime.combine(tgl, pulang.time())
-                is_sabtu = tgl.weekday() == 5
+                if pulang_dt < masuk_dt: pulang_dt += timedelta(days=1)
                 total = (pulang_dt - masuk_dt).total_seconds()/3600 - 1.0
-                jk_eff, jl_tot, l15, l20 = hitung_lembur_lengkap(total, is_sabtu)
-                ws_absen.update(f'F{i}:I{i}', [[jk_eff, jl_tot, l15, l20]])
+                is_sabtu = tgl.weekday() == 5
+                is_minggu = tgl.weekday() == 6
+                is_merah = row[2] in LIBUR_NASIONAL
+                jk, jl, l15, l20 = hitung_lembur_lengkap(total, is_sabtu, is_minggu, is_merah)
+                ws_absen.update(f'F{i}:I{i}', [[jk, jl, l15, l20]])
             except: pass
-        st.success("✅ Semua Sabtu udah jadi 5 jam + lembur 1.5/2.0"); load_data.clear()
+        st.success("✅ FIX SELESAI"); load_data.clear(); st.rerun()
 
 with menu[3]:
     st.dataframe(absen_df, use_container_width=True, height=600)
