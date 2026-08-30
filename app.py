@@ -3,8 +3,8 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
-st.set_page_config(page_title="V10.8.6 FINAL", layout="wide")
-st.title("📍 V10.8.6 FINAL - BULAT + GH GHS + EDIT FIX")
+st.set_page_config(page_title="V10.8.8 ALL", layout="wide")
+st.title("📍 V10.8.8 FINAL - ALL SABTU & GHS 5 JAM BULAT + GH 7 JAM")
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -34,30 +34,28 @@ def get_libur():
 LIBUR_NASIONAL=get_libur()
 HEADER=['ID KARYAWAN','NAMA KARYAWAN','TANGGAL','JAM MASUK','JAM PULANG','JAM KERJA','JAM LEMBUR','LEMBUR 1.5','LEMBUR 2.0','SHIFT','KETERANGAN','STATUS','UANG SHIFT']
 
-# ============ RUMUS LENGKAP BULAT + GH GHS ============
+# ============ RUMUS LENGKAP FINAL ALL SABTU ============
 def hitung_lembur_bulat(jam_total_float, is_sabtu=False, is_minggu=False, is_merah=False, status="H"):
     try: jam_total_float=float(jam_total_float or 0)
     except: jam_total_float=0.0
-    jam_total_float = math.floor(jam_total_float + 0.5) # BULATKAN: 7.27->7, 2.13->2
+    jam_total_float = math.floor(jam_total_float + 0.5) # BULAT NO KOMA: 7.27->7, 2.13->2
     if jam_total_float <=0: return "0.00","0.00","0.00","0.00"
 
-    if status=="GH": # GANTI HARI = 7 JAM EFEKTIF
+    # ALL SABTU & GHS = 5 JAM EFEKTIF - FIX 4 JAM JADI 5 JAM
+    if status=="GHS" or is_sabtu:
+        if jam_total_float <=5: return "5.00","0.00","0.00","0.00"
+        sisa=jam_total_float-5
+        return "5.00",f"{sisa:.2f}",f"{1 if sisa>=1 else sisa:.2f}",f"{sisa-1 if sisa>1 else 0:.2f}"
+
+    # GH = GANTI HARI = 7 JAM EFEKTIF
+    if status=="GH":
         if jam_total_float <=7: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
         sisa=jam_total_float-7
         return "7.00",f"{sisa:.2f}",f"{1 if sisa>=1 else sisa:.2f}",f"{sisa-1 if sisa>1 else 0:.2f}"
 
-    if status=="GHS": # GANTI HARI SABTU = 5 JAM EFEKTIF
-        if jam_total_float <=5: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
-        sisa=jam_total_float-5
-        return "5.00",f"{sisa:.2f}",f"{1 if sisa>=1 else sisa:.2f}",f"{sisa-1 if sisa>1 else 0:.2f}"
-
-    if is_minggu or is_merah: # MINGGU & MERAH = 7 JAM X2.0 BULAT
+    # MINGGU & MERAH = 7 JAM X2.0 BULAT
+    if is_minggu or is_merah:
         return "0.00",f"{jam_total_float:.2f}","0.00",f"{jam_total_float:.2f}"
-
-    if is_sabtu: # SABTU = 5 JAM + 1x1.5 + X2.0
-        if jam_total_float <=5: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
-        sisa=jam_total_float-5
-        return "5.00",f"{sisa:.2f}",f"{1 if sisa>=1 else sisa:.2f}",f"{sisa-1 if sisa>1 else 0:.2f}"
 
     # SENIN-JUMAT = 7 JAM + 1x1.5 + X2.0
     if jam_total_float <=7: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
@@ -97,27 +95,21 @@ def bulatkan_ke_jam_pas(dt): return dt.replace(second=0,microsecond=0)
 
 def cek_keterangan(tgl_dt,jm_str="",jp_str="",jam_float=0,status="H"):
     tgl_str=tgl_dt.strftime('%Y-%m-%d')
-    wd=tgl_dt.weekday()
-    if tgl_str in LIBUR_NASIONAL:
-        if status in ["GH","GHS"]: return f"GANTI HARI - {LIBUR_NASIONAL[tgl_str]}"
+    if tgl_str in LIBUR_NASIONAL and status not in ["GH","GHS"]:
         return f"LIBUR NASIONAL: {LIBUR_NASIONAL[tgl_str]}"
     if jm_str and jp_str and jam_float>0:
         if status=="GH": return "GANTI HARI"
         if status=="GHS": return "GANTI HARI SABTU"
         return "MASUK"
-    if jam_float==0:
-        if status=='L': return "SHIFT LIBUR"
-        if status=='GH': return "GANTI HARI"
-        if status=='GHS': return "GANTI HARI SABTU"
-        if status in ['A','I','S','C','TL']: return {"A":"ALFA","I":"IZIN","S":"SAKIT","C":"CUTI","TL":"TUKAR LIBUR"}[status]
-        if wd==6: return "LIBUR MINGGU"
-        if wd==5: return "SABTU"
-        return "TIDAK MASUK"
-    return "HARI KERJA"
+    if status in ['A','I','S','C','TL','GH','GHS','L']:
+        return {"A":"ALFA","I":"IZIN","S":"SAKIT","C":"CUTI","TL":"TUKAR LIBUR","GH":"GANTI HARI","GHS":"GANTI HARI SABTU","L":"SHIFT LIBUR"}[status]
+    if tgl_dt.weekday()==6: return "LIBUR MINGGU"
+    if tgl_dt.weekday()==5: return "SABTU"
+    return "HARI KERJA" if jam_float>0 else "TIDAK MASUK"
 
 def cek_shift(masuk_dt,jam_float,ket,status):
     if 'LIBUR' in ket and status not in ["GH","GHS"]: return 'SL'
-    if status in ['A','I','S','C','TL','GH','GHS']: return status
+    if status in ['A','I','S','C','TL','GH','GHS','L']: return status
     if jam_float==0: return '-'
     hm=masuk_dt.hour
     if hm>=19: return f"{status}-LS2"
@@ -133,7 +125,12 @@ def hitung(masuk_dt,pulang_dt,status):
     pulang_dt=bulatkan_ke_jam_pas(pulang_dt)
     if pulang_dt<masuk_dt: pulang_dt+=timedelta(days=1)
     total=(pulang_dt-masuk_dt).total_seconds()/3600
-    jam_float=total-1.0 if total>=6.0 else total
+    # FIX ALL SABTU: potong istirahat hanya jika >6 jam
+    is_sabtu_flag = masuk_dt.weekday()==5 or status=="GHS"
+    if is_sabtu_flag:
+        jam_float = total - 1.0 if total > 6.0 else total # 12-17=5 jam = tetap 5.00
+    else:
+        jam_float = total - 1.0 if total >= 6.0 else total
     if jam_float<0: jam_float=0
     tgl_str=masuk_dt.strftime('%Y-%m-%d')
     jk,jl,l15,l20=hitung_lembur_bulat(jam_float, masuk_dt.weekday()==5, masuk_dt.weekday()==6, tgl_str in LIBUR_NASIONAL, status)
@@ -180,7 +177,7 @@ with menu[0]:
         jp=st.time_input("Jam Pulang",datetime.now().time())
     if st.button("💾 SIMPAN ABSEN",type="primary",use_container_width=True,disabled=not nama):
         upsert_absen(id_in, datetime.combine(tgl,jm), datetime.combine(tgl,jp), nama, status_pilih, True)
-        st.success(f"✅ {status_pilih} disimpan - Bulat no koma"); st.rerun()
+        st.success(f"✅ {status_pilih} disimpan - ALL SABTU 5 JAM"); st.rerun()
 
 with menu[1]:
     if "login" not in st.session_state: st.session_state.login=False
@@ -191,25 +188,14 @@ with menu[1]:
             else: st.error("Salah")
     else:
         if st.button("LOGOUT"): st.session_state.login=False; st.rerun()
-        st.subheader("✏️ EDIT GH / GHS")
+        st.subheader("✏️ EDIT ALL SABTU & GHS")
         id_edit=st.text_input("ID Karyawan EDIT").strip().zfill(8)
         if id_edit and id_edit in db_df['ID KARYAWAN'].values:
-            nama_edit=db_df[db_df['ID KARYAWAN']==id_edit]['NAMA KARYAWAN'].values[0]
-            st.info(f"Edit: {nama_edit}")
             data_kar=absen_df[absen_df['ID KARYAWAN']==id_edit]
-            if data_kar.empty:
-                st.warning("Belum ada data, buat baru GH/GHS")
-                tgl_e=st.date_input("Tanggal Baru",datetime.now(),key="tgl_baru")
-                jm_e=st.time_input("Jam Masuk Baru",datetime.strptime("07:00:00",'%H:%M:%S').time(),key="jm_baru")
-                jp_e=st.time_input("Jam Pulang Baru",datetime.strptime("15:00:00",'%H:%M:%S').time(),key="jp_baru")
-                st_e=st.selectbox("Status Baru", ["H","GH","GHS"], format_func=lambda x: {"H":"H","GH":"GH - 7 JAM","GHS":"GHS - 5 JAM"}[x], key="st_baru")
-                if st.button("SIMPAN BARU GH/GHS",type="primary",use_container_width=True):
-                    upsert_absen(id_edit, datetime.combine(tgl_e,jm_e), datetime.combine(tgl_e,jp_e), nama_edit, st_e, True)
-                    st.success("Tersimpan"); st.rerun()
-            else:
+            if not data_kar.empty:
                 pilih_tgl=st.selectbox("Pilih Tanggal", data_kar.sort_values('TGL_DT',ascending=False)['TANGGAL'].tolist(), key="pilih_tgl")
                 row=data_kar[data_kar['TANGGAL']==pilih_tgl].iloc[0]
-                st.write(f"Lama: {row['JAM MASUK']}-{row['JAM PULANG']} | {row['STATUS']} | {row['KETERANGAN']}")
+                st.write(f"Lama: {row['JAM MASUK']}-{row['JAM PULANG']} | {row['STATUS']} | JAM KERJA {row['JAM KERJA']} | {row['KETERANGAN']}")
                 c1,c2=st.columns(2)
                 with c1:
                     tgl_e=st.date_input("Tgl Edit", pd.to_datetime(row['TANGGAL']), key="tgl_e")
@@ -217,35 +203,64 @@ with menu[1]:
                     except: jm_def=datetime.strptime("07:00:00",'%H:%M:%S').time()
                     jm_e=st.time_input("Jam Masuk Edit", jm_def, key="jm_e")
                 with c2:
-                    try: jp_def=datetime.strptime(row['JAM PULANG'],'%H:%M:%S').time() if row['JAM PULANG'] else datetime.strptime("15:00:00",'%H:%M:%S').time()
-                    except: jp_def=datetime.strptime("15:00:00",'%H:%M:%S').time()
+                    try: jp_def=datetime.strptime(row['JAM PULANG'],'%H:%M:%S').time() if row['JAM PULANG'] else datetime.strptime("17:00:00",'%H:%M:%S').time()
+                    except: jp_def=datetime.strptime("17:00:00",'%H:%M:%S').time()
                     jp_e=st.time_input("Jam Pulang Edit", jp_def, key="jp_e")
                     cur=row['STATUS'] if row['STATUS'] in ["H","GH","GHS","TL","I","S","C","A","L"] else "H"
                     idx=["H","GH","GHS","TL","I","S","C","A","L"].index(cur)
-                    st_e=st.selectbox("Jadi Status", ["H","GH","GHS","TL","I","S","C","A","L"], format_func=lambda x: {"H":"H","GH":"GH - GANTI HARI 7 JAM","GHS":"GHS - GANTI SABTU 5 JAM","TL":"TL","I":"IZIN","S":"SAKIT","C":"CUTI","A":"ALFA","L":"LIBUR"}[x], index=idx, key="st_e")
-                if st.button("💾 UPDATE GH/GHS",type="primary",use_container_width=True):
+                    st_e=st.selectbox("Jadi Status", ["H","GH","GHS","TL","I","S","C","A","L"], format_func=lambda x: {"H":"H","GH":"GH 7 JAM","GHS":"GHS 5 JAM","TL":"TL","I":"IZIN","S":"SAKIT","C":"CUTI","A":"ALFA","L":"LIBUR"}[x], index=idx, key="st_e")
+                if st.button("💾 UPDATE",type="primary",use_container_width=True):
                     upsert_absen(id_edit, datetime.combine(tgl_e,jm_e), datetime.combine(tgl_e,jp_e), row['NAMA KARYAWAN'], st_e, True)
-                    st.success(f"✅ {pilih_tgl} jadi {st_e}"); st.balloons(); st.rerun()
-        elif id_edit: st.error("ID tidak ada")
+                    st.success(f"✅ {pilih_tgl} jadi {st_e} 5 JAM"); st.balloons(); st.rerun()
 
 with menu[2]:
-    if st.button("🔥 FIX SEMUA BULAT NO KOMA + GH GHS",type="primary",use_container_width=True):
+    st.info("FIX ALL SABTU: 12:00-17:00 yang tadinya 4 jam jadi 5 jam")
+    if st.button("🔥 FIX ALL SABTU & GHS JADI 5 JAM - SEMUA TANGGAL", type="primary", use_container_width=True):
         vals=ws_absen.get_all_values()
-        for i,r in enumerate(vals[1:],start=2):
+        fixed=0
+        for i,r in enumerate(vals[1:], start=2):
             try:
                 if len(r)<5 or not r[3] or not r[4]: continue
-                tgl=datetime.strptime(r[2],'%Y-%m-%d')
-                masuk=datetime.strptime(r[3],'%H:%M:%S')
-                pulang=datetime.strptime(r[4],'%H:%M:%S')
-                md=datetime.combine(tgl,masuk.time())
-                pd_=datetime.combine(tgl,pulang.time())
-                if pd_<md: pd_+=timedelta(days=1)
-                tot=(pd_-md).total_seconds()/3600-1.0
+                tgl=datetime.strptime(r[2], '%Y-%m-%d')
                 stat=r[11] if len(r)>11 else "H"
-                jk,jl,l15,l20=hitung_lembur_bulat(tot, tgl.weekday()==5, tgl.weekday()==6, r[2] in LIBUR_NASIONAL, stat)
-                ws_absen.update(f'F{i}:I{i}',[[jk,jl,l15,l20]])
+                # ALL SABTU ATAU STATUS GHS
+                if tgl.weekday()==5 or stat=="GHS":
+                    masuk=datetime.strptime(r[3], '%H:%M:%S')
+                    pulang=datetime.strptime(r[4], '%H:%M:%S')
+                    md=datetime.combine(tgl, masuk.time())
+                    pd_=datetime.combine(tgl, pulang.time())
+                    if pd_<md: pd_+=timedelta(days=1)
+                    total=(pd_-md).total_seconds()/3600
+                    jam_float=total-1.0 if total>6.0 else total
+                    jk,jl,l15,l20=hitung_lembur_bulat(jam_float, True, False, False, stat if stat=="GHS" else "H")
+                    ws_absen.update(f'F{i}:M{i}', [[jk,jl,l15,l20,r[9] if len(r)>9 else "GHS","GANTI HARI SABTU" if stat=="GHS" else "SABTU",stat if stat else "H"]])
+                    fixed+=1
             except: pass
-        st.success("✅ FIX BULAT SELESAI - GH=7jam GHS=5jam"); load_data.clear(); st.rerun()
+        st.success(f"✅ {fixed} data Sabtu & GHS berhasil fix jadi 5.00 jam semua!"); load_data.clear(); st.rerun()
+
+    if st.button("🔥 FIX BULAT NO KOMA SEMUA DATA", use_container_width=True):
+        vals=ws_absen.get_all_values()
+        for i,r in enumerate(vals[1:], start=2):
+            try:
+                if len(r)<5 or not r[3] or not r[4]: continue
+                tgl=datetime.strptime(r[2], '%Y-%m-%d')
+                masuk=datetime.strptime(r[3], '%H:%M:%S')
+                pulang=datetime.strptime(r[4], '%H:%M:%S')
+                md=datetime.combine(tgl, masuk.time())
+                pd_=datetime.combine(tgl, pulang.time())
+                if pd_<md: pd_+=timedelta(days=1)
+                total=(pd_-md).total_seconds()/3600
+                is_sabtu=tgl.weekday()==5
+                is_minggu=tgl.weekday()==6
+                stat=r[11] if len(r)>11 else "H"
+                if is_sabtu or stat=="GHS":
+                    jam_float=total-1.0 if total>6.0 else total
+                else:
+                    jam_float=total-1.0 if total>=6.0 else total
+                jk,jl,l15,l20=hitung_lembur_bulat(jam_float, is_sabtu, is_minggu, r[2] in LIBUR_NASIONAL, stat)
+                ws_absen.update(f'F{i}:I{i}', [[jk,jl,l15,l20]])
+            except: pass
+        st.success("✅ Semua lembur bulat!"); load_data.clear(); st.rerun()
 
 with menu[3]:
-    st.dataframe(absen_df,use_container_width=True,height=600)
+    st.dataframe(absen_df, use_container_width=True, height=600)
