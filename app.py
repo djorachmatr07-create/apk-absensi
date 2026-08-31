@@ -3,25 +3,18 @@ from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
-st.set_page_config(page_title="NEXA v11.2 FINAL", layout="wide")
-st.markdown("""
-<style>
-.main-title {font-size:32px; font-weight:800; color:white;}
-.sub-title {font-size:13px; color:#9CA3AF; letter-spacing:3px; text-transform:uppercase;}
-</style>
-<div class='main-title'>🛰️ NEXA ATTENDANCE PRO</div>
-<div class='sub-title'>v11.2 FINAL - JAM LEMBUR = H*1.5 + I*2.0 | GH/GHS NO LEMBUR | LEMBUR+UANG SHIFT</div>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="NEXA v11.2.1", layout="wide")
+st.markdown("<h2>🛰️ NEXA ATTENDANCE PRO</h2><p style='color:#9CA3AF;letter-spacing:3px;font-size:12px'>V11.2.1 FINAL - JAM LEMBUR = H*1.5 + I*2.0</p>", unsafe_allow_html=True)
 
-PASSWORD_ADMIN = "admin123"
-ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
+PASSWORD_ADMIN="admin123"
+ICS_URL="https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
 
 @st.cache_resource
 def connect_gsheet():
-    scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    client = gspread.authorize(creds)
-    sh = client.open("REKAP")
+    scope=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+    creds=Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client=gspread.authorize(creds)
+    sh=client.open("REKAP")
     return sh.worksheet("REKAP ABSENSI"), sh.worksheet("DATABASE KARYAWAN")
 ws_absen, ws_db = connect_gsheet()
 
@@ -44,26 +37,26 @@ HEADER=['ID KARYAWAN','NAMA KARYAWAN','TANGGAL','JAM MASUK','JAM PULANG','JAM KE
 def hitung_lembur_bulat(jam_total_float, is_sabtu=False, is_minggu=False, is_merah=False, status="H"):
     try: jam_total_float=float(jam_total_float or 0)
     except: jam_total_float=0.0
-    jam_total_float = math.floor(jam_total_float + 0.5)
-    if jam_total_float <=0: return "0.00","0.00","0.00","0.00"
+    jam_total_float=math.floor(jam_total_float+0.5)
+    if jam_total_float<=0: return "0.00","0.00","0.00","0.00"
     if status=="GH": return "7.00","0.00","0.00","0.00"
     if status=="GHS": return "5.00","0.00","0.00","0.00"
     if is_sabtu:
-        if jam_total_float <=5: return "5.00","0.00","0.00","0.00"
+        if jam_total_float<=5: return "5.00","0.00","0.00","0.00"
         sisa=jam_total_float-5
-        l15 = 1 if sisa>=1 else sisa
-        l20 = sisa-1 if sisa>1 else 0
-        jl = l15*1.5 + l20*2.0
+        l15=1 if sisa>=1 else sisa
+        l20=sisa-1 if sisa>1 else 0
+        jl=l15*1.5+l20*2.0
         return "5.00",f"{jl:.2f}",f"{l15:.2f}",f"{l20:.2f}"
     if is_minggu or is_merah:
         l20=jam_total_float
         jl=l20*2.0
         return "0.00",f"{jl:.2f}","0.00",f"{l20:.2f}"
-    if jam_total_float <=7: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
+    if jam_total_float<=7: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
     sisa=jam_total_float-7
-    l15 = 1 if sisa>=1 else sisa
-    l20 = sisa-1 if sisa>1 else 0
-    jl = l15*1.5 + l20*2.0
+    l15=1 if sisa>=1 else sisa
+    l20=sisa-1 if sisa>1 else 0
+    jl=l15*1.5+l20*2.0
     return "7.00",f"{jl:.2f}",f"{l15:.2f}",f"{l20:.2f}"
 
 @st.cache_data(ttl=60)
@@ -154,41 +147,92 @@ def upsert_absen(id_kar,masuk_dt,pulang_dt,nama,status="H",sudah_pulang=True):
     else: ws_absen.insert_row(row,2)
     load_data.clear()
 
-menu=st.tabs(["📝 ABSEN","✏️ EDIT","⚙️ ADMIN","📊 REKAP"])
-with menu[0]:
+# TABS HARUS DI LUAR TRY
+tab_absen, tab_edit, tab_admin, tab_rekap = st.tabs(["📝 ABSEN","✏️ EDIT","⚙️ ADMIN","📊 REKAP"])
+
+with tab_absen:
+    st.write("### ABSEN")
     id_in=st.text_input("ID Karyawan ABSEN").strip().zfill(8)
     nama=""
-    if id_in:
-        if id_in in db_df['ID KARYAWAN'].values:
-            nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
-            st.success(f"✅ {nama}")
-        else: st.error("ID tidak ada")
+    if id_in and id_in in db_df['ID KARYAWAN'].values:
+        nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
+        st.success(f"✅ {nama}")
     tgl=st.date_input("Tanggal",datetime.now())
     c1,c2=st.columns(2)
     with c1:
         jm=st.time_input("Jam Masuk",datetime.now().time())
-        status_pilih=st.selectbox("Status", ["H","GH","GHS","TL","I","S","C","A"], format_func=lambda x: {"H":"H - HADIR","GH":"GH - 7 JAM NO LEMBUR","GHS":"GHS - 5 JAM NO LEMBUR","TL":"TUKAR LIBUR","I":"IZIN","S":"SAKIT","C":"CUTI","A":"ALFA"}[x], key="status_absen")
+        status_pilih=st.selectbox("Status", ["H","GH","GHS","TL","I","S","C","A"], key="status_absen")
     with c2:
         jp=st.time_input("Jam Pulang",datetime.now().time())
     if st.button("💾 SIMPAN ABSEN",type="primary",use_container_width=True,disabled=not nama):
         upsert_absen(id_in, datetime.combine(tgl,jm), datetime.combine(tgl,jp), nama, status_pilih, True)
-        st.success(f"✅ {status_pilih}"); st.rerun()
-with menu[1]:
+        st.success("Saved"); st.rerun()
+
+with tab_edit:
+    st.write("### EDIT")
     if "login" not in st.session_state: st.session_state.login=False
     if not st.session_state.login:
-        pw=st.text_input("Password Admin EDIT",type="password")
-        if st.button("LOGIN EDIT"):
+        pw=st.text_input("Password",type="password")
+        if st.button("LOGIN"):
             if pw==PASSWORD_ADMIN: st.session_state.login=True; st.rerun()
-            else: st.error("Salah")
     else:
         if st.button("LOGOUT"): st.session_state.login=False; st.rerun()
-        id_edit=st.text_input("ID Karyawan EDIT").strip().zfill(8)
+        id_edit=st.text_input("ID EDIT").strip().zfill(8)
         if id_edit and id_edit in db_df['ID KARYAWAN'].values:
             data_kar=absen_df[absen_df['ID KARYAWAN']==id_edit]
             if not data_kar.empty:
-                pilih_tgl=st.selectbox("Pilih Tanggal", data_kar.sort_values('TGL_DT',ascending=False)['TANGGAL'].tolist(), key="pilih_tgl")
+                pilih_tgl=st.selectbox("Tanggal", data_kar.sort_values('TGL_DT',ascending=False)['TANGGAL'].tolist())
                 row=data_kar[data_kar['TANGGAL']==pilih_tgl].iloc[0]
-                st.write(f"Lama: {row['JAM MASUK']}-{row['JAM PULANG']} | LEMBUR {row['JAM LEMBUR']} = {row['LEMBUR 1.5']}*1.5 + {row['LEMBUR 2.0']}*2 | Uang:{row['UANG SHIFT']}")
+                st.write(f"{row['JAM MASUK']}-{row['JAM PULANG']} | {row['JAM LEMBUR']}")
                 c1,c2=st.columns(2)
                 with c1:
-                    tgl_e
+                    tgl_e=st.date_input("Tgl", pd.to_datetime(row['TANGGAL']))
+                    jm_e=st.time_input("Masuk", datetime.strptime(row['JAM MASUK'],'%H:%M:%S').time() if row['JAM MASUK'] else datetime.now().time())
+                with c2:
+                    jp_e=st.time_input("Pulang", datetime.strptime(row['JAM PULANG'],'%H:%M:%S').time() if row['JAM PULANG'] else datetime.now().time())
+                    st_e=st.selectbox("Status", ["H","GH","GHS","TL","I","S","C","A","L"], index=0)
+                if st.button("UPDATE",type="primary",use_container_width=True):
+                    upsert_absen(id_edit, datetime.combine(tgl_e,jm_e), datetime.combine(tgl_e,jp_e), row['NAMA KARYAWAN'], st_e, True)
+                    st.success("Updated"); st.rerun()
+
+with tab_admin:
+    st.write("### ⚙️ System Calibration Center")
+    st.info("G = H*1.5 + I*2.0 | GH 7 jam no lembur | GHS 5 jam no lembur | Lembur dapat uang shift")
+    if st.button("🚀 ONE CLICK CALIBRATION", type="primary", use_container_width=True):
+        with st.spinner("Fixing all..."):
+            vals=ws_absen.get_all_values()
+            for i,r in enumerate(vals[1:], start=2):
+                try:
+                    if len(r)<5 or not r[3] or not r[4]: continue
+                    tgl=datetime.strptime(r[2], '%Y-%m-%d')
+                    masuk=datetime.strptime(r[3], '%H:%M:%S')
+                    pulang=datetime.strptime(r[4], '%H:%M:%S')
+                    md=datetime.combine(tgl, masuk.time())
+                    pd_=datetime.combine(tgl, pulang.time())
+                    if pd_<md: pd_+=timedelta(days=1)
+                    total=(pd_-md).total_seconds()/3600
+                    stat=r[11] if len(r)>11 else "H"
+                    id_kar=r[0].zfill(8)
+                    if stat=="GH":
+                        ws_absen.update(f'F{i}:M{i}', [["7.00","0.00","0.00","0.00","GH","GANTI HARI","GH","0"]])
+                    elif stat=="GHS":
+                        ws_absen.update(f'F{i}:M{i}', [["5.00","0.00","0.00","0.00","GHS","GANTI HARI SABTU","GHS","0"]])
+                    else:
+                        is_sabtu=tgl.weekday()==5
+                        is_minggu=tgl.weekday()==6
+                        jam_float=total-1.0 if total>6.0 else total if is_sabtu else (total-1.0 if total>=6.0 else total)
+                        jk,jl,l15,l20=hitung_lembur_bulat(jam_float, is_sabtu, is_minggu, r[2] in LIBUR_NASIONAL, stat)
+                        try: jl_f=float(jl)
+                        except: jl_f=0
+                        shift_lama=r[9] if len(r)>9 else "-"
+                        uang_baru=get_uang_shift(id_kar, shift_lama, jl_f)
+                        ws_absen.update(f'F{i}:M{i}', [[jk,jl,l15,l20,shift_lama,r[10] if len(r)>10 else "MASUK",stat,uang_baru]])
+                except Exception as e:
+                    st.write(f"Error row {i}: {e}")
+            st.success("✅ DONE! G = H*1.5 + I*2.0")
+            load_data.clear()
+            st.balloons()
+            st.rerun()
+
+with tab_rekap:
+    st.dataframe(absen_df, use_container_width=True, height=600)
