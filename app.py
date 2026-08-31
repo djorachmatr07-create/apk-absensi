@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
 st.set_page_config(page_title="NEXA v11.2.1", layout="wide")
-st.markdown("<h2>🛰️ NEXA ATTENDANCE PRO</h2><p style='color:#9CA3AF;letter-spacing:3px;font-size:12px'>V11.2.1 FINAL - JAM LEMBUR = H*1.5 + I*2.0</p>", unsafe_allow_html=True)
+st.markdown("<h2>🛰️ NEXA ATTENDANCE PRO</h2><p style='color:#9CA3AF;letter-spacing:3px;font-size:12px'>V11.2.1 FINAL", unsafe_allow_html=True)
 
 PASSWORD_ADMIN="admin123"
 ICS_URL="https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -197,7 +197,7 @@ with tab_edit:
 
 with tab_admin:
     st.write("### ⚙️ System Calibration Center")
-    st.info("G = H*1.5 + I*2.0 | GH 7 jam no lembur | GHS 5 jam no lembur | Lembur dapat uang shift")
+    st.info("||)
     if st.button("🚀 ONE CLICK CALIBRATION", type="primary", use_container_width=True):
         with st.spinner("Fixing all..."):
             vals=ws_absen.get_all_values()
