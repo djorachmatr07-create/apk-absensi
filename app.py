@@ -146,7 +146,7 @@ def cek_shift(masuk_dt, jam_float, ket, status):
         return '-'
     hm = masuk_dt.hour
     if hm >= 19:
-        return status + "-LS2"
+        return status + "-S2"
     if jam_float >= 11.5:
         sc = 'LS1'
     else:
