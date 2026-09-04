@@ -1,6 +1,8 @@
-    icalendar
-    requests
-    gspread
-    pandas
-    google-auth
-    google-auth-oauthlib
+streamlit
+gspread
+pandas
+google-auth
+requests
+icalendar
+openpyxl
+xlsxwriter
