@@ -12,83 +12,62 @@ sh = client.open("REKAP")
 ws = sh.worksheet("REKAP ABSENSI")
 ws_gaji = sh.worksheet("DATA GAJI")
 
-def load_data():
-    vals = ws.get_all_values()
-    return pd.DataFrame(vals[1:], columns=vals[0])
+def load():
+    v = ws.get_all_values()
+    return pd.DataFrame(v[1:], columns=v[0])
 
-df = load_data()
+df = load()
 df['JAM LEMBUR'] = pd.to_numeric(df['JAM LEMBUR'], errors='coerce').fillna(0)
 
-tab_absen, tab_input, tab_edit, tab_gaji = st.tabs(["📋 ABSENSI", "➕ INPUT ABSEN", "✏️ EDIT / HAPUS", "💰 GAJI"])
+tab1, tab2, tab3 = st.tabs(["📋 DATA", "➕ ABSEN", "💰 GAJI"])
 
-with tab_absen:
-    st.dataframe(df, use_container_width=True, height=500)
+with tab1:
+    st.dataframe(df, use_container_width=True)
+    if st.button("🔄 Reload"): st.rerun()
 
-with tab_input:
-    st.subheader("Input Absen Baru")
-    with st.form("form_absen"):
-        c1,c2 = st.columns(2)
-        id_kar = c1.text_input("ID KARYAWAN", "01213027")
-        nama = c2.text_input("NAMA", "RACHMAT RAHARDJO")
-        tgl = c1.date_input("TANGGAL", datetime.now())
-        jam_masuk = c2.text_input("JAM MASUK", "07:00:00")
-        jam_pulang = c1.text_input("JAM PULANG", "16:00:00")
-        shift = c2.selectbox("SHIFT", ["S1","S2","S3"])
-        status = c1.selectbox("STATUS", ["H","A","I","S"])
-        jam_lembur = c2.number_input("JAM LEMBUR", 0.0, step=0.5)
-        if st.form_submit_button("SIMPAN ABSEN", type="primary", use_container_width=True):
-            ws.append_row([id_kar, nama, str(tgl), jam_masuk, jam_pulang, jam_lembur, shift, status])
-            st.success("Absen tersimpan!")
+with tab2:
+    st.subheader("Absen Cepat")
+    # AUTO ID & NAMA biar gak ribet
+    with st.form("simple"):
+        tgl = st.date_input("Tanggal", datetime.now())
+        shift = st.selectbox("Shift", ["S1 (07-16)", "S2 (15-23)", "S3 (23-07)"])
+        status = st.radio("Status", ["H","A","I","S"], horizontal=True)
+        lembur = st.number_input("Lembur (Jam)", 0.0, 10.0, 0.0, 0.5)
+
+        # Auto jam berdasarkan shift
+        jam_map = {"S1 (07-16)": ("07:00:00","16:00:00"), "S2 (15-23)": ("15:00:00","23:00:00"), "S3 (23-07)": ("23:00:00","07:00:00")}
+        jm, jp = jam_map[shift]
+        shift_code = shift[:2]
+
+        st.info(f"Auto: {jm} - {jp} | Shift {shift_code}")
+        simpan = st.form_submit_button("SIMPAN", type="primary", use_container_width=True)
+        if simpan:
+            ws.append_row(["01213027","RACHMAT RAHARDJO",str(tgl),jm,jp,lembur,shift_code,status])
+            st.success("Tersimpan!")
             st.rerun()
 
-with tab_edit:
-    st.subheader("Edit / Hapus - Klik cell nya langsung")
-    edited = st.data_editor(df, use_container_width=True, num_rows="dynamic", key="editor")
-    c1,c2 = st.columns(2)
-    if c1.button("💾 SIMPAN EDIT", type="primary", use_container_width=True):
-        ws.clear()
-        ws.update([df.columns.values.tolist()] + edited.values.tolist())
-        st.success("Edit tersimpan!")
-    if c2.button("🔄 RELOAD", use_container_width=True):
-        st.rerun()
-
-with tab_gaji:
-    st.subheader("HITUNG GAJI - 13 HARI = 5.781.289")
+with tab3:
     hadir = len(df[df['STATUS']=='H'])
     lembur = df['JAM LEMBUR'].sum()
-    jml_shift = len(df[df['SHIFT'].astype(str).str.contains('S2|S3', na=False)])
-    h_lembur = len(df[df['JAM LEMBUR']>0])
+    s = len(df[df['SHIFT'].astype(str).str.contains('S2|S3', na=False)])
+    hl = len(df[df['JAM LEMBUR']>0])
 
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Hadir", f"{hadir} Hari")
-    c2.metric("Lembur", f"{lembur} Jam")
-    c3.metric("Shift", f"{jml_shift} Hari")
-    c4.metric("Hari Lembur", f"{h_lembur} Hari")
+    st.metric("Hadir", f"{hadir} Hari")
+    st.metric("Lembur", f"{lembur} Jam")
+    st.metric("Shift Malam", f"{s} Hari")
 
-    gaji_pokok = 5252909
-    um = hadir * 9500
-    ul = lembur * 30000
-    us = jml_shift * 2187
-    uml = h_lembur * 9500
-    pend = gaji_pokok + 50000 + um + ul + us + uml + 3500 + 12606 + 15758 + 194357 + 105058 + 210116
-    pot = 12606 + 15758 + 194357 + 105058 + 210116 + 105058 + 52529 + 52529
-    total = pend - pot
+    total = 5252909 + 50000 + hadir*9500 + lembur*30000 + s*2187 + hl*9500 + 3500 + 12606 + 15758 + 194357 + 105058 + 210116 - (12606+15758+194357+105058+210116+105058+52529+52529)
+    st.metric("Total Gaji", f"Rp {total:,}")
 
-    st.metric("TOTAL GAJI", f"Rp {total:,}", delta=f"{hadir} Hari kerja")
-
-    if st.button("🚀 UPDATE KE SHEET DATA GAJI", type="primary", use_container_width=True):
+    if st.button("Update ke Sheet Gaji", type="primary", use_container_width=True):
         ws_gaji.batch_update([
-            {'range': 'B5', 'values': [[f"{hadir} Hari x 9500"]]},
-            {'range': 'C5', 'values': [[um]]},
-            {'range': 'B7', 'values': [[f"{lembur} Jam x 30000"]]},
-            {'range': 'C7', 'values': [[int(ul)]]},
-            {'range': 'B8', 'values': [[f"{jml_shift} Hari x 2187"]]},
-            {'range': 'C8', 'values': [[int(us)]]},
-            {'range': 'B9', 'values': [[f"{h_lembur} Hari x 9500"]]},
-            {'range': 'C9', 'values': [[uml]]},
-            {'range': 'C17', 'values': [[int(pend)]]},
-            {'range': 'E17', 'values': [[int(pot)]]},
+            {'range': 'C5', 'values': [[hadir*9500]]},
+            {'range': 'C7', 'values': [[int(lembur*30000)]]},
+            {'range': 'C8', 'values': [[int(s*2187)]]},
+            {'range': 'C9', 'values': [[hl*9500]]},
             {'range': 'C19', 'values': [[int(total)]]},
         ])
-        st.success(f"Sheet DATA GAJI udah diupdate! {hadir} Hari = Rp {total:,} - cek Google Sheet, udah gak #ERROR! lagi")
+        st.success(f"Done Rp {total:,}")
         st.balloons()
+
+# Edit tetep bisa dari tab DATA - tinggal klik ikon pensil di tabel atas
