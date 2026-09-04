@@ -1,10 +1,10 @@
-import streamlit as st, gspread, pandas as pd, requests, math
-from datetime import datetime, timedelta
+import streamlit as st, gspread, pandas as pd, requests, math, calendar
+from datetime import datetime, timedelta, date
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
-st.set_page_config(page_title="NEXA v11.5.1", layout="wide")
-st.markdown("<h2>NEXA ATTENDANCE PRO</h2><p style='color:#9CA3AF;font-size:12px'>V11.5.1 FIX ERROR | 1 HARI 1 ABSEN | 22:00=S3</p>", unsafe_allow_html=True)
+st.set_page_config(page_title="NEXA V15", layout="wide")
+st.markdown("<h2>🛰️ NEXA V15 - ABSEN + GAJI + PERIODE</h2><p style='color:#9CA3AF;font-size:12px'>1 HARI 1 ABSEN | 22:00=S3 | PERIODE 21-20 | G=H*1.5+I*2.0</p>", unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -21,18 +21,18 @@ ws_absen, ws_db = connect_gsheet()
 @st.cache_data(ttl=86400)
 def get_libur():
     try:
-        r = requests.get(ICS_URL, timeout=10)
-        cal = Calendar.from_ical(r.text)
-        libur = {}
+        r=requests.get(ICS_URL,timeout=10)
+        cal=Calendar.from_ical(r.text)
+        libur={}
         for c in cal.walk():
-            if c.name == "VEVENT":
-                s = c.get('dtstart').dt
-                if hasattr(s, 'strftime'): s = s.strftime('%Y-%m-%d')
-                libur[s] = str(c.get('summary'))
+            if c.name=="VEVENT":
+                s=c.get('dtstart').dt
+                if hasattr(s,'strftime'): s=s.strftime('%Y-%m-%d')
+                libur[s]=str(c.get('summary'))
         return libur
     except: return {}
-LIBUR_NASIONAL = get_libur()
-HEADER = ['ID KARYAWAN','NAMA KARYAWAN','TANGGAL','JAM MASUK','JAM PULANG','JAM KERJA','JAM LEMBUR','LEMBUR 1.5','LEMBUR 2.0','SHIFT','KETERANGAN','STATUS','UANG SHIFT']
+LIBUR_NASIONAL=get_libur()
+HEADER=['ID KARYAWAN','NAMA KARYAWAN','TANGGAL','JAM MASUK','JAM PULANG','JAM KERJA','JAM LEMBUR','LEMBUR 1.5','LEMBUR 2.0','SHIFT','KETERANGAN','STATUS','UANG SHIFT']
 
 def hitung_lembur_bulat(jam_total_float, is_sabtu=False, is_minggu=False, is_merah=False, status="H"):
     try: jam_total_float=float(jam_total_float or 0)
@@ -49,9 +49,7 @@ def hitung_lembur_bulat(jam_total_float, is_sabtu=False, is_minggu=False, is_mer
         jl=l15*1.5+l20*2.0
         return "5.00",f"{jl:.2f}",f"{l15:.2f}",f"{l20:.2f}"
     if is_minggu or is_merah:
-        l20=jam_total_float
-        jl=l20*2.0
-        return "0.00",f"{jl:.2f}","0.00",f"{l20:.2f}"
+        return "0.00",f"{jam_total_float*2:.2f}","0.00",f"{jam_total_float:.2f}"
     if jam_total_float<=7: return f"{jam_total_float:.2f}","0.00","0.00","0.00"
     sisa=jam_total_float-7
     l15=1 if sisa>=1 else sisa
@@ -89,19 +87,6 @@ def get_uang_shift(id_kar, shift, jam_lembur_float=0):
     if not any(x in str(shift).upper() for x in ['S2','S3','LS1','LS2']): return "0"
     return v
 
-def bulatkan_ke_jam_pas(dt): return dt.replace(second=0,microsecond=0)
-def cek_keterangan(tgl_dt,jm_str="",jp_str="",jam_float=0,status="H"):
-    tgl_str=tgl_dt.strftime('%Y-%m-%d')
-    if tgl_str in LIBUR_NASIONAL and status not in ["GH","GHS"]: return "LIBUR NASIONAL: "+LIBUR_NASIONAL[tgl_str]
-    if jm_str and jp_str and jam_float>0:
-        if status=="GH": return "GANTI HARI"
-        if status=="GHS": return "GANTI HARI SABTU"
-        return "MASUK"
-    if status in ['A','I','S','C','TL','GH','GHS','L']: return {"A":"ALFA","I":"IZIN","S":"SAKIT","C":"CUTI","TL":"TUKAR LIBUR","GH":"GANTI HARI","GHS":"GANTI HARI SABTU","L":"SHIFT LIBUR"}[status]
-    if tgl_dt.weekday()==6: return "LIBUR MINGGU"
-    if tgl_dt.weekday()==5: return "SABTU"
-    return "HARI KERJA" if jam_float>0 else "TIDAK MASUK"
-
 def cek_shift(masuk_dt,jam_float,ket,status):
     if 'LIBUR' in ket and status not in ["GH","GHS"]: return 'SL'
     if status in ['A','I','S','C','TL','GH','GHS','L']: return status
@@ -110,18 +95,26 @@ def cek_shift(masuk_dt,jam_float,ket,status):
     if 7 <= hm <= 14: base='S1'
     elif 15 <= hm <= 21: base='S2'
     else: base='S3'
-    if jam_float >= 11.5:
-        return f"{status}-LS1" if base=='S1' else f"{status}-LS2"
+    if jam_float >= 11.5: return f"{status}-LS1" if base=='S1' else f"{status}-LS2"
     return f"{status}-{base}"
 
+def cek_keterangan(tgl_dt,jm_str="",jp_str="",jam_float=0,status="H"):
+    tgl_str=tgl_dt.strftime('%Y-%m-%d')
+    if tgl_str in LIBUR_NASIONAL and status not in ["GH","GHS"]: return "LIBUR: "+LIBUR_NASIONAL[tgl_str]
+    if jm_str and jp_str and jam_float>0:
+        if status=="GH": return "GANTI HARI"
+        if status=="GHS": return "GANTI HARI SABTU"
+        return "MASUK"
+    if status in ['A','I','S','C','TL','GH','GHS','L']: return {"A":"ALFA","I":"IZIN","S":"SAKIT","C":"CUTI","TL":"TUKAR LIBUR","GH":"GANTI HARI","GHS":"GANTI HARI SABTU","L":"LIBUR"}[status]
+    if tgl_dt.weekday()==6: return "MINGGU"
+    if tgl_dt.weekday()==5: return "SABTU"
+    return "KERJA" if jam_float>0 else "TIDAK MASUK"
+
 def hitung(masuk_dt,pulang_dt,status):
-    masuk_dt=bulatkan_ke_jam_pas(masuk_dt)
-    pulang_dt=bulatkan_ke_jam_pas(pulang_dt)
     if pulang_dt<masuk_dt: pulang_dt+=timedelta(days=1)
     total=(pulang_dt-masuk_dt).total_seconds()/3600
-    is_sabtu_flag = masuk_dt.weekday()==5
-    if is_sabtu_flag or status in ["GH","GHS"]: jam_float = total - 1.0 if total > 6.0 else total
-    else: jam_float = total - 1.0 if total >= 6.0 else total
+    is_sabtu = masuk_dt.weekday()==5
+    jam_float = total-1.0 if total>6.0 else total if is_sabtu or status in ["GH","GHS"] else (total-1.0 if total>=6.0 else total)
     if jam_float<0: jam_float=0
     tgl_str=masuk_dt.strftime('%Y-%m-%d')
     jk,jl,l15,l20=hitung_lembur_bulat(jam_float, masuk_dt.weekday()==5, masuk_dt.weekday()==6, tgl_str in LIBUR_NASIONAL, status)
@@ -133,8 +126,7 @@ def upsert_absen(id_kar,masuk_dt,pulang_dt,nama,status="H",allow_overwrite=False
     id_kar=id_kar.zfill(8)
     tgl_str=masuk_dt.strftime('%Y-%m-%d')
     existing=absen_df[(absen_df['ID KARYAWAN']==id_kar)&(absen_df['TANGGAL']==tgl_str)]
-    if not existing.empty and not allow_overwrite:
-        return False
+    if not existing.empty and not allow_overwrite: return False
     jk,jl,l1,l2,shift,ket,jm,jp=hitung(masuk_dt,pulang_dt,status)
     if status in ['A','I','S','C','L','TL'] and status not in ["GH","GHS"]:
         jm="";jp="";jk=jl=l1=l2="0.00"; shift='SL' if tgl_str in LIBUR_NASIONAL else status; ket=cek_keterangan(masuk_dt,"","",0,status); uang="0"
@@ -150,7 +142,24 @@ def upsert_absen(id_kar,masuk_dt,pulang_dt,nama,status="H",allow_overwrite=False
     load_data.clear()
     return True
 
-tab1, tab2, tab3, tab4 = st.tabs(["ABSEN","EDIT","ADMIN","REKAP"])
+# === HELPER PERIODE ===
+def get_periode(bulan,tahun,mode):
+    if mode=="Bulan Kalender":
+        awal=date(tahun,bulan,1)
+        akhir=date(tahun,bulan,calendar.monthrange(tahun,bulan)[1])
+    elif mode=="21-20 Payroll":
+        if bulan==1:
+            awal=date(tahun-1,12,21)
+            akhir=date(tahun,1,20)
+        else:
+            awal=date(tahun,bulan-1,21)
+            akhir=date(tahun,bulan,20)
+    else:
+        awal=date(tahun,bulan,1)
+        akhir=date(tahun,bulan,calendar.monthrange(tahun,bulan)[1])
+    return awal, akhir
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["ABSEN","EDIT","ADMIN","REKAP","GAJI"])
 
 with tab1:
     st.write("ABSEN - 1 HARI 1X")
@@ -166,25 +175,19 @@ with tab1:
         status_pilih=st.selectbox("Status", ["H","GH","GHS","TL","I","S","C","A"])
     with c2:
         jp=st.time_input("Pulang",datetime.now().time())
-    sudah_absen=False
+    sudah=False
     if id_in and nama:
-        tgl_str_cek=tgl.strftime('%Y-%m-%d')
-        cek=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL']==tgl_str_cek)]
+        cek=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL']==tgl.strftime('%Y-%m-%d'))]
         if not cek.empty:
-            sudah_absen=True
-            row=cek.iloc[0]
-            st.error("SUDAH ABSEN")
-            st.write(f"{tgl_str_cek} {row['JAM MASUK']}-{row['JAM PULANG']} {row['SHIFT']}")
-            st.warning("1 hari 1x, edit via EDIT")
-    if st.button("SIMPAN",type="primary",use_container_width=True,disabled=not nama or sudah_absen):
+            sudah=True
+            st.error(f"SUDAH ABSEN {cek.iloc[0]['JAM MASUK']}-{cek.iloc[0]['JAM PULANG']} {cek.iloc[0]['SHIFT']}")
+    if st.button("SIMPAN",type="primary",use_container_width=True,disabled=not nama or sudah):
         ok=upsert_absen(id_in, datetime.combine(tgl,jm), datetime.combine(tgl,jp), nama, status_pilih, False)
-        if not ok:
-            st.error("GAGAL SUDAH ABSEN")
-        else:
-            st.success("BERHASIL"); st.balloons(); st.rerun()
+        if not ok: st.error("SUDAH ABSEN")
+        else: st.success("BERHASIL"); st.balloons(); st.rerun()
 
 with tab2:
-    st.write("EDIT DATA")
+    st.write("EDIT")
     if "login" not in st.session_state: st.session_state.login=False
     if not st.session_state.login:
         pw=st.text_input("Password",type="password")
@@ -212,7 +215,6 @@ with tab2:
 
 with tab3:
     st.write("ADMIN")
-    st.write("Rumus G=H*1.5+I*2.0 | 22:00=S3 | 1 hari 1 absen")
     if st.button("CALIBRATION",type="primary",use_container_width=True):
         with st.spinner("Fixing..."):
             vals=ws_absen.get_all_values()
@@ -228,27 +230,62 @@ with tab3:
                     total=(pd_-md).total_seconds()/3600
                     stat=r[11] if len(r)>11 else "H"
                     id_kar=r[0].zfill(8)
-                    if stat=="GH":
-                        ws_absen.update(f'F{i}:M{i}', [["7.00","0.00","0.00","0.00","GH","GANTI HARI","GH","0"]])
-                    elif stat=="GHS":
-                        ws_absen.update(f'F{i}:M{i}', [["5.00","0.00","0.00","0.00","GHS","GANTI HARI SABTU","GHS","0"]])
-                    else:
-                        is_sabtu=tgl.weekday()==5
-                        is_minggu=tgl.weekday()==6
-                        jam_float=total-1.0 if total>6.0 else total if is_sabtu else (total-1.0 if total>=6.0 else total)
-                        jk,jl,l15,l20=hitung_lembur_bulat(jam_float, is_sabtu, is_minggu, r[2] in LIBUR_NASIONAL, stat)
-                        try: jl_f=float(jl)
-                        except: jl_f=0
-                        hm=masuk.hour
-                        if 7 <= hm <= 14: base='S1'
-                        elif 15 <= hm <= 21: base='S2'
-                        else: base='S3'
-                        shift_baru = stat+"-LS1" if jam_float>=11.5 and base=='S1' else stat+"-LS2" if jam_float>=11.5 else stat+"-"+base
-                        uang_baru=get_uang_shift(id_kar, shift_baru, jl_f)
-                        ket_baru=cek_keterangan(tgl, r[3], r[4], jam_float, stat)
-                        ws_absen.update(f'F{i}:M{i}', [[jk,jl,l15,l20,shift_baru,ket_baru,stat,uang_baru]])
+                    is_sabtu=tgl.weekday()==5
+                    is_minggu=tgl.weekday()==6
+                    jam_float=total-1.0 if total>6.0 else total if is_sabtu else (total-1.0 if total>=6.0 else total)
+                    jk,jl,l15,l20=hitung_lembur_bulat(jam_float, is_sabtu, is_minggu, r[2] in LIBUR_NASIONAL, stat)
+                    try: jl_f=float(jl)
+                    except: jl_f=0
+                    hm=masuk.hour
+                    base='S1' if 7<=hm<=14 else 'S2' if 15<=hm<=21 else 'S3'
+                    shift_baru = stat+"-LS1" if jam_float>=11.5 and base=='S1' else stat+"-LS2" if jam_float>=11.5 else stat+"-"+base
+                    uang_baru=get_uang_shift(id_kar, shift_baru, jl_f)
+                    ket_baru=cek_keterangan(tgl, r[3], r[4], jam_float, stat)
+                    ws_absen.update(f'F{i}:M{i}', [[jk,jl,l15,l20,shift_baru,ket_baru,stat,uang_baru]])
                 except: pass
             st.success("DONE"); load_data.clear(); st.balloons(); st.rerun()
 
 with tab4:
-    st.dataframe(absen_df, use_container_width=True, height=600)
+    st.write("### REKAP DENGAN PERIODE")
+    mode_r = st.radio("Mode Rekap", ["Bulan Kalender","21-20 Payroll","Custom"], horizontal=True, key="mode_r")
+    c1,c2,c3=st.columns(3)
+    with c1: bulan_r=st.selectbox("Bulan", list(range(1,13)), index=datetime.now().month-1, key="bulan_r")
+    with c2: tahun_r=st.number_input("Tahun", 2020, 2030, datetime.now().year, key="tahun_r")
+    with c3:
+        if mode_r=="Custom":
+            awal_r=st.date_input("Dari", date(tahun_r,bulan_r,1), key="awal_r")
+            akhir_r=st.date_input("Sampai", date(tahun_r,bulan_r,calendar.monthrange(tahun_r,bulan_r)[1]), key="akhir_r")
+        else:
+            awal_r, akhir_r = get_periode(bulan_r, tahun_r, mode_r)
+            st.write(f"Periode")
+            st.success(f"{awal_r} s/d {akhir_r}")
+    if not absen_df.empty:
+        df_f = absen_df[(absen_df['TGL_DT']>=pd.to_datetime(awal_r))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_r))]
+        st.write(f"Total {len(df_f)} data periode {awal_r} - {akhir_r}")
+        st.dataframe(df_f, use_container_width=True, height=500)
+        csv = df_f.to_csv(index=False).encode('utf-8')
+        st.download_button("DOWNLOAD CSV PERIODE", csv, f"rekap_{awal_r}_{akhir_r}.csv", "text/csv", use_container_width=True)
+
+with tab5:
+    st.write("### GAJI V14 - AUTO DARI ABSEN + PERIODE")
+    mode_g = st.radio("Mode Gaji", ["Bulan Kalender","21-20 Payroll","Custom"], horizontal=True, key="mode_g")
+    c1,c2=st.columns(2)
+    with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=datetime.now().month-1, key="bulan_g")
+    with c2: tahun_g=st.number_input("Tahun Gaji", 2020, 2030, datetime.now().year, key="tahun_g")
+    if mode_g=="Custom":
+        cc1,cc2=st.columns(2)
+        with cc1: awal_g=st.date_input("Dari Tgl Gaji", date(tahun_g,bulan_g,1), key="awal_g")
+        with cc2: akhir_g=st.date_input("Sampai Tgl Gaji", date(tahun_g,bulan_g,calendar.monthrange(tahun_g,bulan_g)[1]), key="akhir_g")
+    else:
+        awal_g, akhir_g = get_periode(bulan_g, tahun_g, mode_g)
+    st.info(f"Periode Gaji: {awal_g} s/d {akhir_g} ({(akhir_g-awal_g).days+1} hari)")
+    id_gaji=st.selectbox("Pilih Karyawan", db_df['ID KARYAWAN'].tolist() if not db_df.empty else ["01213027"])
+    if st.button("HITUNG REAL DARI ABSEN", type="primary", use_container_width=True):
+        if not absen_df.empty:
+            df_g = absen_df[(absen_df['ID KARYAWAN']==id_gaji)&(absen_df['TGL_DT']>=pd.to_datetime(awal_g))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_g))]
+            st.success(f"Ditemukan {len(df_g)} hari kerja")
+            st.dataframe(df_g, use_container_width=True)
+            total_kerja = df_g['JAM KERJA'].astype(float).sum() if not df_g.empty else 0
+            total_lembur = df_g['JAM LEMBUR'].astype(float).sum() if not df_g.empty else 0
+            st.metric("Total Jam Kerja", f"{total_kerja:.2f}")
+            st.metric("Total Jam Lembur (sudah x1.5 & x2)", f"{total_lembur:.2f}")
