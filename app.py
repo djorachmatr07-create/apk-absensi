@@ -1,13 +1,13 @@
 import streamlit as st, gspread, pandas as pd, requests, math, calendar
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
-import pytz
 
-WIB = pytz.timezone('Asia/Jakarta')
+# FIX WIB TANPA PYTZ - PAKAI TIMEZONE NATIVE
+WIB = timezone(timedelta(hours=7))
 
-st.set_page_config(page_title="NEXA V17.1 FIX WIB", layout="wide", page_icon="🛰️")
-st.markdown("<h2>🛰️ NEXA V17.1 FIX WIB</h2><p style='color:#9CA3AF;font-size:12px'>FIX TANGGAL 07 JADI 06 | 1 TOMBOL GENERATE ALL</p>", unsafe_allow_html=True)
+st.set_page_config(page_title="NEXA V17.2 WIB FIX", layout="wide", page_icon="🛰️")
+st.markdown("<h2>🛰️ NEXA V17.2 WIB FIX</h2><p style='color:#9CA3AF;font-size:12px'>FIX ERROR PYTZ | TGL 07 BUKAN 06 LAGI | 1 TOMBOL</p>", unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -109,14 +109,10 @@ with tab1:
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
     ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
-
-    # FIX WIB - JADI TGL 07 BUKAN 06 LAGI
     today_wib = now_wib().date()
     today_str = today_wib.strftime('%Y-%m-%d')
     now_time_wib = now_wib().time()
-
-    row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="") ] if not absen_df.empty else pd.DataFrame()
-
+    row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="")] if not absen_df.empty else pd.DataFrame()
     if row_today.empty:
         st.info(f"📅 Hari ini {today_str} WIB - Silakan absen")
         status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
@@ -167,7 +163,6 @@ with tab2:
         pw=st.text_input("Password ADMIN", type="password")
         if st.button("LOGIN"):
             if pw==PASSWORD_ADMIN: st.session_state.login=True; st.rerun()
-            else: st.error("Salah")
     else:
         if st.button("LOGOUT"): st.session_state.login=False; st.rerun()
         id_edit=st.text_input("ID EDIT", value="01213027").strip().zfill(8)
@@ -215,7 +210,7 @@ with tab3:
                     ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","SL",f"LIBUR NASIONAL {LIBUR_NASIONAL[ds]}","L","0"],2); cnt+=1
             d+=timedelta(days=1)
         load_data.clear()
-        st.success(f"Hapus {len(to_del)} mundur + Generate {cnt} maju. Tanggal sekarang WIB {now_wib().date()}"); st.balloons(); st.rerun()
+        st.success(f"Hapus {len(to_del)} + Generate {cnt} - Tgl WIB {now_wib().date()}"); st.balloons(); st.rerun()
 
 with tab4:
     st.markdown("### REKAP")
@@ -234,7 +229,7 @@ with tab4:
         st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
-    st.markdown("### GAJI - FIX ERROR")
+    st.markdown("### GAJI - FIX ERROR TYPE")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=now_wib().month-1, key="bulan_g")
@@ -245,7 +240,7 @@ with tab5:
     if st.button("HITUNG GAJI REAL + UPDATE SHEET", type="primary", use_container_width=True):
         df_g=absen_df[(absen_df['ID KARYAWAN']==id_gaji)&(absen_df['TGL_DT']>=pd.to_datetime(awal_g))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_g))].copy()
         if df_g.empty:
-            st.warning("Data kosong periode ini")
+            st.warning("Data kosong")
         else:
             df_g['SHIFT']=df_g['SHIFT'].fillna('').astype(str)
             hadir=len(df_g[df_g['STATUS']=='H'])
@@ -262,4 +257,4 @@ with tab5:
                 ws_gaji.batch_update([{'range':'B5','values':[[f"{hadir} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},{'range':'B7','values':[[f"{total_lembur:.2f} Jam x 30000"]]},{'range':'C7','values':[[int(uang_lembur)]]},{'range':'B8','values':[[f"{shift_malam} Hari x 2187"]]},{'range':'C8','values':[[int(uang_shift)]]},{'range':'B9','values':[[f"{hari_lembur} Hari x 9500"]]},{'range':'C9','values':[[int(uang_makan_lembur)]]},{'range':'C17','values':[[int(total_pend)]]},{'range':'E17','values':[[int(total_pot)]]},{'range':'C19','values':[[int(total_gaji)]]}])
                 st.success(f"✅ Updated Rp {int(total_gaji):,}"); st.balloons()
             except Exception as e:
-                st.error(f"Error update sheet: {e}")
+                st.error(f"Error: {e}")
