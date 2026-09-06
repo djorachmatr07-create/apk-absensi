@@ -10,8 +10,8 @@ st.set_page_config(page_title="NEXA PRO", layout="wide", page_icon="⚡")
 
 st.markdown("""
 <style>
-  .main-title { font-size:30px; font-weight:900; letter-spacing:1px; margin-bottom:0px; }
-  .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
+ .main-title { font-size:30px; font-weight:900; letter-spacing:1px; margin-bottom:0px; }
+ .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
 <div class='sub-title'>SMART HR SYSTEM • AUTO WIB</div>
@@ -107,11 +107,9 @@ def get_periode(bulan,tahun,mode):
         if bulan==1: return date(tahun-1,12,21), date(tahun,1,20)
         else: return date(tahun,bulan-1,21), date(tahun,bulan,20)
 
-# GANTI GAJI JADI PAYROLL DISINI
 tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
 
 with tab1:
-    # JAM BERJALAN WIB - LIVE CLOCK
     components.html("""
     <div style="background:#111827; border-radius:12px; padding:14px 18px; border:1px solid #1F2937; text-align:center;">
         <div style="color:#9CA3AF; font-size:11px; letter-spacing:3px; font-weight:700;">WAKTU REALTIME WIB</div>
@@ -137,30 +135,42 @@ with tab1:
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
-    ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?")
+
+    ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False, help="Jika tidak dicentang, jam absen otomatis mengikuti jam berjalan WIB")
+
     today_wib = now_wib().date()
     today_str = today_wib.strftime('%Y-%m-%d')
-    now_time_wib = now_wib().time()
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="")] if not absen_df.empty else pd.DataFrame()
 
     if row_today.empty:
-        st.info(f"📅 {today_str} WIB • Siap Absen")
+        if not ubah_manual:
+            st.info(f"⏱️ Mode OTOMATIS: Absen mengikuti jam berjalan • {today_str}")
+        else:
+            st.info(f"✏️ Mode MANUAL")
+
         status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
         c1,c2=st.columns(2)
         if ubah_manual:
             tgl_m=c1.date_input("TANGGAL MASUK", value=today_wib, key="tgl_m")
-            jam_m=c2.time_input("JAM MASUK", value=now_time_wib, key="jam_m")
+            jam_m=c2.time_input("JAM MASUK", value=now_wib().time(), key="jam_m")
         else:
-            tgl_m=today_wib; jam_m=now_time_wib
-            c1.metric("TGL MASUK", str(tgl_m)); c2.metric("JAM MASUK", jam_m.strftime('%H:%M:%S'))
+            tgl_m=today_wib; jam_m=now_wib().time()
+            c1.metric("TGL MASUK", str(tgl_m))
+            c2.metric("JAM MASUK", jam_m.strftime('%H:%M:%S') + " WIB AUTO")
+
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
+            if not ubah_manual:
+                klik_wib = now_wib()
+                tgl_m = klik_wib.date()
+                jam_m = klik_wib.time()
             vals=ws_absen.get_all_values()
             for i,r in enumerate(vals[1:], start=2):
                 if len(r)>2 and r[0]==id_in and r[2]==tgl_m.strftime('%Y-%m-%d') and r[3]=="":
                     ws_absen.delete_rows(i); break
             masuk_dt=datetime.combine(tgl_m, jam_m)
             row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","MASUK","H","0"]
-            ws_absen.insert_row(row,2); load_data.clear(); st.success(f"MASUK {tgl_m} OK"); st.balloons(); st.rerun()
+            ws_absen.insert_row(row,2); load_data.clear()
+            st.success(f"MASUK {tgl_m} {jam_m.strftime('%H:%M:%S')} WIB OK"); st.balloons(); st.rerun()
     else:
         r=row_today.iloc[0]
         if r['JAM PULANG']=="" or r['JAM PULANG'] in ["0.00","0"]:
@@ -168,21 +178,28 @@ with tab1:
             c1,c2=st.columns(2)
             if ubah_manual:
                 tgl_p=c1.date_input("TANGGAL PULANG", value=today_wib, key="tgl_p")
-                jam_p=c2.time_input("JAM PULANG", value=now_time_wib, key="jam_p")
+                jam_p=c2.time_input("JAM PULANG", value=now_wib().time(), key="jam_p")
             else:
-                tgl_p=today_wib; jam_p=now_time_wib
-                try:
-                    if jam_p < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time(): tgl_p=today_wib+timedelta(days=1)
-                except: pass
-                c1.metric("TGL PULANG", str(tgl_p)); c2.metric("JAM PULANG", jam_p.strftime('%H:%M:%S'))
+                tgl_p=today_wib; jam_p=now_wib().time()
+                c1.metric("TGL PULANG", str(tgl_p))
+                c2.metric("JAM PULANG", jam_p.strftime('%H:%M:%S') + " WIB AUTO")
+
             if st.button("🔴 ABSEN PULANG SEKARANG", type="primary", use_container_width=True):
+                if not ubah_manual:
+                    klik_wib = now_wib()
+                    tgl_p = klik_wib.date()
+                    jam_p = klik_wib.time()
+                    try:
+                        if jam_p < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time():
+                            tgl_p = tgl_p + timedelta(days=1)
+                    except: pass
                 masuk_dt=datetime.combine(datetime.strptime(r['TANGGAL MASUK'], '%Y-%m-%d').date(), datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time())
                 pulang_dt=datetime.combine(tgl_p, jam_p)
                 jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,r['STATUS'])
                 uang=get_uang_shift(id_in, shift, float(jl))
                 rn=row_today.index[0]+2
                 ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],r['JAM MASUK'],tgl_p.strftime('%Y-%m-%d'),jam_p.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
-                load_data.clear(); st.success(f"PULANG {jk} jam"); st.balloons(); st.rerun()
+                load_data.clear(); st.success(f"PULANG {jk} jam - {jam_p.strftime('%H:%M:%S')} WIB"); st.balloons(); st.rerun()
         else:
             st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']}")
 
@@ -256,7 +273,7 @@ with tab4:
         st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
-    st.markdown("#### PAYROLL • GAJI")
+    st.markdown("#### PAYROLL")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=now_wib().month-1, key="bulan_g")
