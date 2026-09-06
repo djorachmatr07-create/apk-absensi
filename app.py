@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, date
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
 
-st.set_page_config(page_title="NEXA V16 SIMPLE", layout="wide", page_icon="🛰️")
-st.markdown("<h2>🛰️ NEXA V16 SIMPLE</h2><p style='color:#9CA3AF;font-size:12px'>TANGGAL MASUK | TANGGAL PULANG | 1 HARI 2 KLIK | EDITABLE</p>", unsafe_allow_html=True)
+st.set_page_config(page_title="NEXA V16.1 FIX LIBUR", layout="wide", page_icon="🛰️")
+st.markdown("<h2>🛰️ NEXA V16.1 FIX LIBUR</h2><p style='color:#9CA3AF;font-size:12px'>FIX 0.00 | AUTO MINGGU LIBUR | TANGGAL MASUK - TANGGAL PULANG</p>", unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
 ICS_URL = "https://calendar.google.com/calendar/ical/id.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics"
@@ -32,7 +32,6 @@ def get_libur():
         return libur
     except: return {}
 LIBUR_NASIONAL = get_libur()
-
 HEADER = ['ID KARYAWAN','NAMA KARYAWAN','TANGGAL MASUK','JAM MASUK','TANGGAL PULANG','JAM PULANG','JAM KERJA','JAM LEMBUR','LEMBUR 1.5','LEMBUR 2.0','SHIFT','KETERANGAN','STATUS','UANG SHIFT']
 
 def hitung_lembur_bulat(jam_float, is_sabtu=False, is_minggu=False, is_merah=False, status="H"):
@@ -116,6 +115,28 @@ def hitung_final(masuk_dt,pulang_dt,status_input):
     else: jk,jl,l15,l20=hitung_lembur_bulat(jam_float, masuk_dt.weekday()==5, masuk_dt.weekday()==6, tgl_masuk_str in LIBUR_NASIONAL, status_input); ket=cek_keterangan(masuk_dt, masuk_dt.strftime('%H:%M:%S'), pulang_dt.strftime('%H:%M:%S'), jam_float, status_input); shift=cek_shift(masuk_dt, jam_float, ket, status_input)
     return jk,jl,l15,l20,shift,ket,status_final
 
+def auto_generate_libur_df(df_absen):
+    if df_absen.empty: return df_absen
+    min_tgl = df_absen['TGL_DT'].min()
+    max_tgl = df_absen['TGL_DT'].max()
+    if pd.isna(min_tgl) or pd.isna(max_tgl): return df_absen
+    all_dates = pd.date_range(min_tgl, max_tgl, freq='D')
+    existing = df_absen['TANGGAL MASUK'].tolist()
+    new_rows = []
+    for d in all_dates:
+        d_str = d.strftime('%Y-%m-%d')
+        if d_str not in existing:
+            is_minggu = d.weekday()==6
+            is_merah = d_str in LIBUR_NASIONAL
+            if is_minggu or is_merah:
+                ket = "MINGGU" if is_minggu else f"LIBUR: {LIBUR_NASIONAL[d_str]}"
+                new_rows.append(["01213027","RACHMAT RAHARDJO",d_str,"",d_str,"","0.00","0.00","L",ket,"L","0", d])
+    if new_rows:
+        df_extra = pd.DataFrame([r[:14] for r in new_rows], columns=HEADER)
+        df_extra['TGL_DT']=pd.to_datetime(df_extra['TANGGAL MASUK'])
+        return pd.concat([df_absen, df_extra]).sort_values('TGL_DT', ascending=False)
+    return df_absen
+
 def get_periode(bulan,tahun,mode):
     if mode=="Bulan Kalender": awal=date(tahun,bulan,1); akhir=date(tahun,bulan,calendar.monthrange(tahun,bulan)[1])
     elif mode=="21-20 Payroll":
@@ -127,20 +148,15 @@ def get_periode(bulan,tahun,mode):
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["ABSEN","EDIT","ADMIN","REKAP","GAJI"])
 
 with tab1:
-    st.markdown("### ABSEN SIMPLE - 2 KLIK + EDIT TGL/JAM")
+    st.markdown("### ABSEN SIMPLE - EDITABLE")
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
-    nama=""
-    if id_in and id_in in db_df['ID KARYAWAN'].values:
-        nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0]
-        st.success(f"👋 {nama}")
-
-    if not nama:
-        st.warning("Isi ID dulu min")
+    nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
+    if nama: st.success(f"👋 {nama}")
+    if not nama: st.warning("Isi ID dulu")
     else:
         ubah_manual = st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
         today_str = datetime.now().strftime('%Y-%m-%d')
         row_today = absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)] if not absen_df.empty else pd.DataFrame()
-
         if row_today.empty:
             st.info(f"📅 Hari ini {today_str} belum absen")
             status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
@@ -149,63 +165,47 @@ with tab1:
                 tgl_masuk_manual=c1.date_input("TANGGAL MASUK", value=date.today(), key="tgl_m")
                 jam_masuk_manual=c2.time_input("JAM MASUK", value=datetime.now().time(), key="jam_m")
             else:
-                tgl_masuk_manual=date.today()
-                jam_masuk_manual=datetime.now().time()
-                c1.write(f"TANGGAL MASUK: {tgl_masuk_manual}")
-                c2.write(f"JAM MASUK: {jam_masuk_manual.strftime('%H:%M:%S')}")
-            if st.button("🟢 ABSEN MASUK SEKARANG", type="primary", use_container_width=True):
+                tgl_masuk_manual=date.today(); jam_masuk_manual=datetime.now().time()
+                c1.write(f"TGL MASUK: {tgl_masuk_manual}"); c2.write(f"JAM: {jam_masuk_manual.strftime('%H:%M:%S')}")
+            if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
                 masuk_dt=datetime.combine(tgl_masuk_manual, jam_masuk_manual)
                 cek_dup=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==tgl_masuk_manual.strftime('%Y-%m-%d'))] if not absen_df.empty else pd.DataFrame()
-                if not cek_dup.empty:
-                    st.error(f"Sudah absen di {tgl_masuk_manual}")
+                if not cek_dup.empty: st.error(f"Sudah absen {tgl_masuk_manual}")
                 else:
-                    row=[id_in,nama,tgl_masuk_manual.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","0.00","0.00","-","MASUK",status_pilih if status_pilih!="H" else "H","0"]
-                    if status_pilih=="GH": row[6]="7.00"; row[10]="GANTI HARI"
-                    if status_pilih=="GHS": row[6]="5.00"; row[10]="GANTI HARI SABTU"
-                    ws_absen.insert_row(row,2)
-                    load_data.clear()
-                    st.success(f"MASUK {tgl_masuk_manual} {row[3]} OK"); st.balloons(); st.rerun()
+                    row=[id_in,nama,tgl_masuk_manual.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","-","MASUK",status_pilih,"0"]
+                    ws_absen.insert_row(row,2); load_data.clear(); st.success("MASUK OK"); st.balloons(); st.rerun()
         else:
             r=row_today.iloc[0]
-            jam_masuk_sudah=r['JAM MASUK']
-            jam_pulang_sudah=r['JAM PULANG']
-            if jam_pulang_sudah=="" or jam_pulang_sudah=="0" or pd.isna(jam_pulang_sudah):
-                st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {jam_masuk_sudah} - Belum Pulang")
+            if r['JAM PULANG']=="" or r['JAM PULANG']=="0.00" or r['JAM PULANG']=="0" or pd.isna(r['JAM PULANG']):
+                st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - Belum Pulang")
                 c1,c2=st.columns(2)
                 if ubah_manual:
                     default_tgl_p=date.today()
                     try:
-                        masuk_t=datetime.strptime(jam_masuk_sudah, '%H:%M:%S').time()
-                        if datetime.now().time() < masuk_t: default_tgl_p=date.today()+timedelta(days=1)
+                        if datetime.now().time() < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time(): default_tgl_p=date.today()+timedelta(days=1)
                     except: pass
                     tgl_pulang_manual=c1.date_input("TANGGAL PULANG", value=default_tgl_p, key="tgl_p")
                     jam_pulang_manual=c2.time_input("JAM PULANG", value=datetime.now().time(), key="jam_p")
                 else:
-                    tgl_pulang_manual=date.today()
-                    jam_pulang_manual=datetime.now().time()
+                    tgl_pulang_manual=date.today(); jam_pulang_manual=datetime.now().time()
                     try:
-                        masuk_t=datetime.strptime(jam_masuk_sudah, '%H:%M:%S').time()
-                        if jam_pulang_manual < masuk_t: tgl_pulang_manual=date.today()+timedelta(days=1)
+                        if jam_pulang_manual < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time(): tgl_pulang_manual=date.today()+timedelta(days=1)
                     except: pass
-                    c1.write(f"TGL PULANG: {tgl_pulang_manual}")
-                    c2.write(f"JAM PULANG: {jam_pulang_manual.strftime('%H:%M:%S')}")
-                if st.button("🔴 ABSEN PULANG SEKARANG", type="primary", use_container_width=True):
-                    try: masuk_dt=datetime.combine(datetime.strptime(r['TANGGAL MASUK'], '%Y-%m-%d').date(), datetime.strptime(jam_masuk_sudah, '%H:%M:%S').time())
-                    except: masuk_dt=datetime.combine(date.today(), datetime.strptime(jam_masuk_sudah, '%H:%M:%S').time())
+                    c1.write(f"TGL PULANG: {tgl_pulang_manual}"); c2.write(f"JAM: {jam_pulang_manual.strftime('%H:%M:%S')}")
+                if st.button("🔴 ABSEN PULANG", type="primary", use_container_width=True):
+                    try: masuk_dt=datetime.combine(datetime.strptime(r['TANGGAL MASUK'], '%Y-%m-%d').date(), datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time())
+                    except: masuk_dt=datetime.combine(date.today(), datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time())
                     pulang_dt=datetime.combine(tgl_pulang_manual, jam_pulang_manual)
                     jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,r['STATUS'])
-                    try: jl_f=float(jl)
-                    except: jl_f=0
-                    uang=get_uang_shift(id_in, shift, jl_f)
+                    uang=get_uang_shift(id_in, shift, float(jl) if jl else 0)
                     rn=row_today.index[0]+2
-                    ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],jam_masuk_sudah,tgl_pulang_manual.strftime('%Y-%m-%d'),jam_pulang_manual.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
-                    load_data.clear()
-                    st.success(f"PULANG {tgl_pulang_manual} {jam_pulang_manual} | Kerja {jk} Lembur {jl}"); st.balloons(); st.rerun()
+                    ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],r['JAM MASUK'],tgl_pulang_manual.strftime('%Y-%m-%d'),jam_pulang_manual.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
+                    load_data.clear(); st.success(f"PULANG OK {jk} jam"); st.balloons(); st.rerun()
             else:
-                st.success(f"✅ SELESAI: {r['TANGGAL MASUK']} {r['JAM MASUK']} -> {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']} {r['JAM KERJA']} jam")
+                st.success(f"✅ SELESAI: {r['TANGGAL MASUK']} {r['JAM MASUK']} -> {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']}")
 
 with tab2:
-    st.write("EDIT")
+    st.write("EDIT");
     if "login" not in st.session_state: st.session_state.login=False
     if not st.session_state.login:
         pw=st.text_input("Password",type="password")
@@ -214,35 +214,46 @@ with tab2:
     else:
         if st.button("LOGOUT"): st.session_state.login=False; st.rerun()
         id_edit=st.text_input("ID EDIT").strip().zfill(8)
-        if id_edit and id_edit in db_df['ID KARYAWAN'].values:
+        if id_edit in db_df['ID KARYAWAN'].values:
             data_kar=absen_df[absen_df['ID KARYAWAN']==id_edit]
             if not data_kar.empty:
                 pilih_tgl=st.selectbox("Tanggal Masuk", data_kar.sort_values('TGL_DT',ascending=False)['TANGGAL MASUK'].tolist())
                 row=data_kar[data_kar['TANGGAL MASUK']==pilih_tgl].iloc[0]
                 st.write(f"{row['TANGGAL MASUK']} {row['JAM MASUK']} -> {row['TANGGAL PULANG']} {row['JAM PULANG']} {row['SHIFT']}")
                 c1,c2=st.columns(2)
-                with c1: tgl_e=st.date_input("Tgl Masuk Edit", pd.to_datetime(row['TANGGAL MASUK'])); jm_e=st.time_input("Masuk Edit", datetime.strptime(row['JAM MASUK'],'%H:%M:%S').time() if row['JAM MASUK'] else datetime.now().time())
-                with c2: tgl_pe=st.date_input("Tgl Pulang Edit", pd.to_datetime(row['TANGGAL PULANG']) if row['TANGGAL PULANG'] else pd.to_datetime(row['TANGGAL MASUK'])); jp_e=st.time_input("Pulang Edit", datetime.strptime(row['JAM PULANG'],'%H:%M:%S').time() if row['JAM PULANG'] else datetime.now().time())
-                st_e=st.selectbox("Status Baru", ["H","GH","GHS","TL","I","S","C","A","L"])
+                with c1: tgl_e=st.date_input("Tgl Masuk", pd.to_datetime(row['TANGGAL MASUK'])); jm_e=st.time_input("Masuk", datetime.strptime(row['JAM MASUK'],'%H:%M:%S').time() if row['JAM MASUK'] and row['JAM MASUK']!="0.00" else datetime.now().time())
+                with c2: tgl_pe=st.date_input("Tgl Pulang", pd.to_datetime(row['TANGGAL PULANG']) if row['TANGGAL PULANG'] and row['TANGGAL PULANG']!="0.00" else pd.to_datetime(row['TANGGAL MASUK'])); jp_e=st.time_input("Pulang", datetime.strptime(row['JAM PULANG'],'%H:%M:%S').time() if row['JAM PULANG'] and row['JAM PULANG']!="0.00" else datetime.now().time())
+                st_e=st.selectbox("Status", ["H","GH","GHS","TL","I","S","C","A","L"])
                 if st.button("UPDATE",type="primary",use_container_width=True):
                     masuk_dt=datetime.combine(tgl_e,jm_e); pulang_dt=datetime.combine(tgl_pe,jp_e)
-                    jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,st_e)
-                    try: jl_f=float(jl)
-                    except: jl_f=0
-                    uang=get_uang_shift(id_edit, shift, jl_f)
+                    if jp_e.strftime('%H:%M:%S')=="00:00:00" or row['JAM PULANG']=="":
+                        jk,jl,l15,l20,shift,ket,status_final="0.00","0.00","0.00","0.00","-","MASUK",st_e
+                        uang="0"
+                    else:
+                        jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,st_e)
+                        uang=get_uang_shift(id_edit, shift, float(jl))
                     rn=data_kar[data_kar['TANGGAL MASUK']==pilih_tgl].index[0]+2
                     ws_absen.update(f'A{rn}:N{rn}', [[id_edit, row['NAMA KARYAWAN'], tgl_e.strftime('%Y-%m-%d'), jm_e.strftime('%H:%M:%S'), tgl_pe.strftime('%Y-%m-%d'), jp_e.strftime('%H:%M:%S'), jk,jl,l15,l20,shift,ket,status_final,uang]])
                     load_data.clear(); st.success("Updated"); st.rerun()
 
 with tab3:
-    st.write("ADMIN")
+    st.write("ADMIN FIX")
+    if st.button("🔧 FIX DATA 0.00 & HAPUS ABSEN GAGAL TGL 7", use_container_width=True):
+        vals=ws_absen.get_all_values()
+        for i,r in enumerate(vals[1:], start=2):
+            if len(r)<6: continue
+            # FIX yang di SS mu baris 2: 2026-09-07 14:35 JAM PULANG 0.00 -> jadi data gagal, hapus atau jadi incomplete
+            if r[2]=="2026-09-07" and (r[5]=="0.00" or r[5]=="0" or r[5]==""):
+                ws_absen.delete_rows(i)
+                break
+        load_data.clear(); st.success("Data 0.00 tgl 7 dihapus - sekarang tgl 6 & 7 kosong, bakal auto jadi LIBUR"); st.rerun()
     if st.button("MIGRASI TANGGAL PULANG", use_container_width=True):
         vals=ws_absen.get_all_values()
         for i,r in enumerate(vals[1:], start=2):
             if len(r)<6: continue
             try:
                 if r[4]=="":
-                    tgl_m=datetime.strptime(r[2], '%Y-%m-%d'); jm=datetime.strptime(r[3], '%H:%M:%S'); jp=datetime.strptime(r[5], '%H:%M:%S') if r[5] else jm
+                    tgl_m=datetime.strptime(r[2], '%Y-%m-%d'); jm=datetime.strptime(r[3], '%H:%M:%S'); jp=datetime.strptime(r[5], '%H:%M:%S') if r[5] not in ["","0.00","0"] else jm
                     pulang=datetime.combine(tgl_m.date(), jp.time()); masuk=datetime.combine(tgl_m.date(), jm.time())
                     if pulang < masuk: pulang+=timedelta(days=1)
                     ws_absen.update(f'E{i}', [[pulang.strftime('%Y-%m-%d')]])
@@ -250,8 +261,8 @@ with tab3:
         st.success("Migrasi selesai"); load_data.clear(); st.rerun()
 
 with tab4:
-    st.write("REKAP PERIODE")
-    mode_r=st.radio("Mode Rekap", ["21-20 Payroll","Bulan Kalender","Custom"], horizontal=True, key="mode_r")
+    st.write("REKAP - AUTO LIBUR MINGGU")
+    mode_r=st.radio("Mode", ["21-20 Payroll","Bulan Kalender","Custom"], horizontal=True, key="mode_r")
     c1,c2=st.columns(2)
     with c1: bulan_r=st.selectbox("Bulan", list(range(1,13)), index=datetime.now().month-1, key="bulan_r")
     with c2: tahun_r=st.number_input("Tahun", 2020, 2030, datetime.now().year, key="tahun_r")
@@ -260,25 +271,23 @@ with tab4:
         with cc1: awal_r=st.date_input("Dari", date(tahun_r,bulan_r,1), key="awal_r")
         with cc2: akhir_r=st.date_input("Sampai", date(tahun_r,bulan_r,calendar.monthrange(tahun_r,bulan_r)[1]), key="akhir_r")
     else: awal_r, akhir_r=get_periode(bulan_r,tahun_r,mode_r)
-    st.success(f"{awal_r} s/d {akhir_r}")
+    st.success(f"{awal_r} s/d {akhir_r} - Minggu Auto L")
     if not absen_df.empty:
-        df_f=absen_df[(absen_df['TGL_DT']>=pd.to_datetime(awal_r))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_r))]
+        df_tampil = auto_generate_libur_df(absen_df)
+        df_f=df_tampil[(df_tampil['TGL_DT']>=pd.to_datetime(awal_r))&(df_tampil['TGL_DT']<=pd.to_datetime(akhir_r))]
         st.dataframe(df_f, use_container_width=True, height=500)
+        st.info(f"Tgl 6 Minggu 2026-09-06 sekarang bakal muncul L | MINGGU kalau kosong")
 
 with tab5:
-    st.write("GAJI PERIODE")
+    st.write("GAJI")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=datetime.now().month-1, key="bulan_g")
     with c2: tahun_g=st.number_input("Tahun Gaji", 2020, 2030, datetime.now().year, key="tahun_g")
-    if mode_g=="Custom":
-        cc1,cc2=st.columns(2)
-        with cc1: awal_g=st.date_input("Dari Tgl Gaji", date(tahun_g,bulan_g,1), key="awal_g")
-        with cc2: akhir_g=st.date_input("Sampai Tgl Gaji", date(tahun_g,bulan_g,calendar.monthrange(tahun_g,bulan_g)[1]), key="akhir_g")
-    else: awal_g, akhir_g=get_periode(bulan_g,tahun_g,mode_g)
-    st.info(f"Periode Gaji: {awal_g} s/d {akhir_g}")
+    awal_g, akhir_g=get_periode(bulan_g,tahun_g,mode_g)
+    st.info(f"Periode: {awal_g} s/d {akhir_g}")
     id_gaji=st.selectbox("Karyawan", db_df['ID KARYAWAN'].tolist() if not db_df.empty else ["01213027"])
-    if st.button("HITUNG REAL + UPDATE SHEET GAJI", type="primary", use_container_width=True):
+    if st.button("HITUNG GAJI", type="primary", use_container_width=True):
         if not absen_df.empty:
             df_g=absen_df[(absen_df['ID KARYAWAN']==id_gaji)&(absen_df['TGL_DT']>=pd.to_datetime(awal_g))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_g))]
             hadir=len(df_g[df_g['STATUS']=='H'])
@@ -290,13 +299,4 @@ with tab5:
             total_pot=12606+15758+194357+105058+210116+105058+52529+52529
             total_gaji=total_pend-total_pot
             st.success(f"{len(df_g)} hari | Hadir {hadir} | Lembur {total_lembur}")
-            st.dataframe(df_g, use_container_width=True)
-            c1,c2,c3=st.columns(3); c1.metric("Hadir", f"{hadir} Hari"); c2.metric("Lembur", f"{total_lembur:.2f}"); c3.metric("TOTAL GAJI", f"Rp {int(total_gaji):,}")
-            ws_gaji.batch_update([
-                {'range': 'B5', 'values': [[f"{hadir} Hari x 9500"]]},{'range': 'C5', 'values': [[int(uang_makan)]]},
-                {'range': 'B7', 'values': [[f"{total_lembur:.2f} Jam x 30000"]]},{'range': 'C7', 'values': [[int(uang_lembur)]]},
-                {'range': 'B8', 'values': [[f"{shift_malam} Hari x 2187"]]},{'range': 'C8', 'values': [[int(uang_shift)]]},
-                {'range': 'B9', 'values': [[f"{hari_lembur} Hari x 9500"]]},{'range': 'C9', 'values': [[int(uang_makan_lembur)]]},
-                {'range': 'C17', 'values': [[int(total_pend)]]},{'range': 'E17', 'values': [[int(total_pot)]]},{'range': 'C19', 'values': [[int(total_gaji)]]},
-            ])
-            st.success(f"✅ Updated Rp {int(total_gaji):,}"); st.balloons()
+            c1,c2,c3=st.columns(3); c1.metric("Hadir", f"{hadir}"); c2.metric("Lembur", f"{total_lembur:.2f}"); c3.metric("TOTAL", f"Rp {int(total_gaji):,}")
