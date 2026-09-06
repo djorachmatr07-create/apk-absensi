@@ -2,17 +2,16 @@ import streamlit as st, gspread, pandas as pd, requests, math, calendar
 from datetime import datetime, timedelta, date, timezone
 from google.oauth2.service_account import Credentials
 from icalendar import Calendar
+import streamlit.components.v1 as components
 
 WIB = timezone(timedelta(hours=7))
 
 st.set_page_config(page_title="NEXA PRO", layout="wide", page_icon="⚡")
 
-# HEADER KEREN - UDAH GAK ADA TULISAN DEBUG YANG DILINGKARI
 st.markdown("""
 <style>
-   .main-title { font-size:30px; font-weight:900; letter-spacing:1px; margin-bottom:0px; }
-   .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
-   .stTabs [data-baseweb="tab"] { font-weight:700; }
+  .main-title { font-size:30px; font-weight:900; letter-spacing:1px; margin-bottom:0px; }
+  .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
 <div class='sub-title'>SMART HR SYSTEM • AUTO WIB</div>
@@ -108,9 +107,33 @@ def get_periode(bulan,tahun,mode):
         if bulan==1: return date(tahun-1,12,21), date(tahun,1,20)
         else: return date(tahun,bulan-1,21), date(tahun,bulan,20)
 
-tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","GAJI"])
+# GANTI GAJI JADI PAYROLL DISINI
+tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
 
 with tab1:
+    # JAM BERJALAN WIB - LIVE CLOCK
+    components.html("""
+    <div style="background:#111827; border-radius:12px; padding:14px 18px; border:1px solid #1F2937; text-align:center;">
+        <div style="color:#9CA3AF; font-size:11px; letter-spacing:3px; font-weight:700;">WAKTU REALTIME WIB</div>
+        <div id="clock" style="color:#22C55E; font-size:36px; font-weight:900; font-family:monospace; letter-spacing:2px;">--:--:--</div>
+        <div id="date" style="color:#E5E7EB; font-size:13px; margin-top:2px;"></div>
+    </div>
+    <script>
+    function updateClock(){
+        const now = new Date();
+        const wib = new Date(now.toLocaleString('en-US', {timeZone: 'Asia/Jakarta'}));
+        const jam = String(wib.getHours()).padStart(2,'0');
+        const menit = String(wib.getMinutes()).padStart(2,'0');
+        const detik = String(wib.getSeconds()).padStart(2,'0');
+        const tgl = wib.toLocaleDateString('id-ID', {weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+        document.getElementById('clock').innerText = jam+':'+menit+':'+detik+' WIB';
+        document.getElementById('date').innerText = tgl;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+    </script>
+    """, height=110)
+
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
@@ -119,6 +142,7 @@ with tab1:
     today_str = today_wib.strftime('%Y-%m-%d')
     now_time_wib = now_wib().time()
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="")] if not absen_df.empty else pd.DataFrame()
+
     if row_today.empty:
         st.info(f"📅 {today_str} WIB • Siap Absen")
         status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
@@ -213,7 +237,7 @@ with tab3:
                 elif ds in LIBUR_NASIONAL:
                     ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","SL",f"LIBUR NASIONAL {LIBUR_NASIONAL[ds]}","L","0"],2); cnt+=1
             d+=timedelta(days=1)
-        load_data.clear(); st.success(f"Fix {len(to_del)} + Generate {cnt} - WIB {now_wib().date()}"); st.balloons(); st.rerun()
+        load_data.clear(); st.success(f"Fix {len(to_del)} + Generate {cnt}"); st.balloons(); st.rerun()
 
 with tab4:
     st.markdown("#### REKAP")
@@ -232,7 +256,7 @@ with tab4:
         st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
-    st.markdown("#### GAJI")
+    st.markdown("#### PAYROLL • GAJI")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=now_wib().month-1, key="bulan_g")
@@ -240,7 +264,7 @@ with tab5:
     awal_g,akhir_g=get_periode(bulan_g,tahun_g,mode_g)
     st.info(f"Periode: {awal_g} s/d {akhir_g}")
     id_gaji=st.selectbox("Karyawan", db_df['ID KARYAWAN'].tolist())
-    if st.button("HITUNG GAJI", type="primary", use_container_width=True):
+    if st.button("HITUNG PAYROLL", type="primary", use_container_width=True):
         df_g=absen_df[(absen_df['ID KARYAWAN']==id_gaji)&(absen_df['TGL_DT']>=pd.to_datetime(awal_g))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_g))].copy()
         if df_g.empty: st.warning("Data kosong")
         else:
@@ -254,8 +278,8 @@ with tab5:
             total_pot=12606+15758+194357+105058+210116+105058+52529+52529
             total_gaji=total_pend-total_pot
             st.dataframe(df_g, use_container_width=True)
-            c1,c2,c3=st.columns(3); c1.metric("Hadir", hadir); c2.metric("Lembur", f"{total_lembur:.2f}"); c3.metric("TOTAL", f"Rp {int(total_gaji):,}")
+            c1,c2,c3=st.columns(3); c1.metric("Hadir", hadir); c2.metric("Lembur", f"{total_lembur:.2f}"); c3.metric("TOTAL PAYROLL", f"Rp {int(total_gaji):,}")
             try:
                 ws_gaji.batch_update([{'range':'B5','values':[[f"{hadir} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},{'range':'B7','values':[[f"{total_lembur:.2f} Jam x 30000"]]},{'range':'C7','values':[[int(uang_lembur)]]},{'range':'B8','values':[[f"{shift_malam} Hari x 2187"]]},{'range':'C8','values':[[int(uang_shift)]]},{'range':'B9','values':[[f"{hari_lembur} Hari x 9500"]]},{'range':'C9','values':[[int(uang_makan_lembur)]]},{'range':'C17','values':[[int(total_pend)]]},{'range':'E17','values':[[int(total_pot)]]},{'range':'C19','values':[[int(total_gaji)]]}])
-                st.success(f"✅ Rp {int(total_gaji):,}"); st.balloons()
+                st.success(f"✅ PAYROLL Rp {int(total_gaji):,} Updated"); st.balloons()
             except Exception as e: st.error(f"Error: {e}")
