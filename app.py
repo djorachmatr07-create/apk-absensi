@@ -14,7 +14,7 @@ st.markdown("""
 .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
-<div class='sub-title'>SMART HR SYSTEM • AUTO WIB</div>
+<div class='sub-title'>SMART HR SYSTEM • AUTO WIB • V20</div>
 """, unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
@@ -59,6 +59,8 @@ def load_data():
         absen['TGL_DT']=pd.to_datetime(absen['TANGGAL MASUK'],errors='coerce')
         absen['SHIFT']=absen['SHIFT'].fillna('').astype(str)
         absen['JAM LEMBUR']=pd.to_numeric(absen['JAM LEMBUR'],errors='coerce').fillna(0)
+        absen['JAM MASUK']=absen['JAM MASUK'].astype(str)
+        absen['JAM PULANG']=absen['JAM PULANG'].astype(str)
     return db,absen,col_uang
 db_df,absen_df,COL_UANG_SHIFT=load_data()
 
@@ -135,9 +137,7 @@ with tab1:
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
-
     ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
-
     today_wib = now_wib().date()
     today_str = today_wib.strftime('%Y-%m-%d')
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="")] if not absen_df.empty else pd.DataFrame()
@@ -150,42 +150,34 @@ with tab1:
             jam_m=c2.time_input("JAM MASUK", value=now_wib().time(), key="jam_m")
         else:
             status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
-            tgl_m=today_wib
-            jam_m=now_wib().time()
-
+            tgl_m=today_wib; jam_m=now_wib().time()
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
             if not ubah_manual:
-                klik_wib = now_wib()
-                tgl_m = klik_wib.date()
-                jam_m = klik_wib.time()
+                klik_wib = now_wib(); tgl_m = klik_wib.date(); jam_m = klik_wib.time()
             vals=ws_absen.get_all_values()
             for i,r in enumerate(vals[1:], start=2):
                 if len(r)>2 and r[0]==id_in and r[2]==tgl_m.strftime('%Y-%m-%d') and r[3]=="":
                     ws_absen.delete_rows(i); break
             masuk_dt=datetime.combine(tgl_m, jam_m)
-            row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","MASUK","H","0"]
+            # KETERANGAN UNDEFINED KALO BELUM PULANG
+            row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED - BELUM PULANG","H","0"]
             ws_absen.insert_row(row,2); load_data.clear()
-            st.success(f"MASUK {tgl_m} {jam_m.strftime('%H:%M:%S')} WIB OK"); st.balloons(); st.rerun()
+            st.success(f"MASUK {tgl_m} {jam_m.strftime('%H:%M:%S')} WIB - UNDEFINED"); st.balloons(); st.rerun()
     else:
         r=row_today.iloc[0]
-        if r['JAM PULANG']=="" or r['JAM PULANG'] in ["0.00","0"]:
-            st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - Belum Pulang")
+        if r['JAM PULANG']=="" or r['JAM PULANG'] in ["0.00","0","nan","None"]:
+            st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - Belum Pulang (UNDEFINED)")
             if ubah_manual:
                 c1,c2=st.columns(2)
                 tgl_p=c1.date_input("TANGGAL PULANG", value=today_wib, key="tgl_p")
                 jam_p=c2.time_input("JAM PULANG", value=now_wib().time(), key="jam_p")
             else:
-                tgl_p=today_wib
-                jam_p=now_wib().time()
-
+                tgl_p=today_wib; jam_p=now_wib().time()
             if st.button("🔴 ABSEN PULANG SEKARANG", type="primary", use_container_width=True):
                 if not ubah_manual:
-                    klik_wib = now_wib()
-                    tgl_p = klik_wib.date()
-                    jam_p = klik_wib.time()
+                    klik_wib = now_wib(); tgl_p = klik_wib.date(); jam_p = klik_wib.time()
                     try:
-                        if jam_p < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time():
-                            tgl_p = tgl_p + timedelta(days=1)
+                        if jam_p < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time(): tgl_p = tgl_p + timedelta(days=1)
                     except: pass
                 masuk_dt=datetime.combine(datetime.strptime(r['TANGGAL MASUK'], '%Y-%m-%d').date(), datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time())
                 pulang_dt=datetime.combine(tgl_p, jam_p)
@@ -193,9 +185,9 @@ with tab1:
                 uang=get_uang_shift(id_in, shift, float(jl))
                 rn=row_today.index[0]+2
                 ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],r['JAM MASUK'],tgl_p.strftime('%Y-%m-%d'),jam_p.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
-                load_data.clear(); st.success(f"PULANG {jk} jam WIB"); st.balloons(); st.rerun()
+                load_data.clear(); st.success(f"PULANG {jk} jam WIB - {ket}"); st.balloons(); st.rerun()
         else:
-            st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']}")
+            st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']} | {r['KETERANGAN']}")
 
 with tab2:
     st.markdown("#### EDIT DATA")
@@ -212,14 +204,14 @@ with tab2:
             if not data_kar.empty:
                 pilih_tgl=st.selectbox("Pilih Tanggal", data_kar['TANGGAL MASUK'].tolist())
                 row=data_kar[data_kar['TANGGAL MASUK']==pilih_tgl].iloc[0]
-                st.info(f"{row['TANGGAL MASUK']} {row['JAM MASUK']} → {row['JAM PULANG']} | {row['SHIFT']}")
+                st.info(f"{row['TANGGAL MASUK']} {row['JAM MASUK']} → {row['JAM PULANG']} | {row['SHIFT']} | {row['KETERANGAN']}")
                 c1,c2=st.columns(2)
                 with c1:
                     tgl_e=st.date_input("Tgl Masuk", pd.to_datetime(row['TANGGAL MASUK']).date())
-                    jm_e=st.time_input("Jam Masuk", datetime.strptime(row['JAM MASUK'], '%H:%M:%S').time() if row['JAM MASUK'] and row['JAM MASUK'] not in ["0.00",""] else now_wib().time())
+                    jm_e=st.time_input("Jam Masuk", datetime.strptime(row['JAM MASUK'], '%H:%M:%S').time() if row['JAM MASUK'] and row['JAM MASUK'] not in ["0.00","0","nan","None",""] else now_wib().time())
                 with c2:
-                    tgl_pe=st.date_input("Tgl Pulang", pd.to_datetime(row['TANGGAL PULANG']).date() if row['TANGGAL PULANG'] and row['TANGGAL PULANG'] not in ["","0.00"] else pd.to_datetime(row['TANGGAL MASUK']).date())
-                    jp_e=st.time_input("Jam Pulang", datetime.strptime(row['JAM PULANG'], '%H:%M:%S').time() if row['JAM PULANG'] and row['JAM PULANG'] not in ["","0.00"] else now_wib().time())
+                    tgl_pe=st.date_input("Tgl Pulang", pd.to_datetime(row['TANGGAL PULANG']).date() if row['TANGGAL PULANG'] and row['TANGGAL PULANG'] not in ["","0.00","0","nan","None"] else pd.to_datetime(row['TANGGAL MASUK']).date())
+                    jp_e=st.time_input("Jam Pulang", datetime.strptime(row['JAM PULANG'], '%H:%M:%S').time() if row['JAM PULANG'] and row['JAM PULANG'] not in ["","0.00","0","nan","None"] else now_wib().time())
                 st_e=st.selectbox("Status", ["H","GH","GHS","A","L","I","S","TL"])
                 if st.button("UPDATE", type="primary", use_container_width=True):
                     masuk_dt=datetime.combine(tgl_e, jm_e); pulang_dt=datetime.combine(tgl_pe, jp_e)
@@ -244,7 +236,7 @@ with tab3:
             ds=d.strftime('%Y-%m-%d')
             if ds not in existing:
                 if d.weekday()==6:
-                    ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","L","MINGGU","L","0"],2); cnt+=1
+                    ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","0.00","0.00","L","MINGGU","L","0"],2); cnt+=1
                 elif ds in LIBUR_NASIONAL:
                     ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","SL",f"LIBUR NASIONAL {LIBUR_NASIONAL[ds]}","L","0"],2); cnt+=1
             d+=timedelta(days=1)
@@ -264,10 +256,13 @@ with tab4:
     st.success(f"{awal_r} → {akhir_r}")
     if not absen_df.empty:
         df_f=absen_df[(absen_df['TGL_DT']>=pd.to_datetime(awal_r))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_r))]
-        st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
+        # TANDAI UNDEFINED MERAH
+        def color_undefined(val):
+            return 'background-color: #7F1D1D; color: white' if 'UNDEFINED' in str(val) else ''
+        st.dataframe(df_f.sort_values('TGL_DT',ascending=False).style.applymap(color_undefined, subset=['KETERANGAN']), use_container_width=True, height=600)
 
 with tab5:
-    st.markdown("#### PAYROLL")
+    st.markdown("#### PAYROLL - FIX HARI SAMA & UNDEFINED")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=now_wib().month-1, key="bulan_g")
@@ -279,18 +274,57 @@ with tab5:
         df_g=absen_df[(absen_df['ID KARYAWAN']==id_gaji)&(absen_df['TGL_DT']>=pd.to_datetime(awal_g))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_g))].copy()
         if df_g.empty: st.warning("Data kosong")
         else:
-            df_g['SHIFT']=df_g['SHIFT'].fillna('').astype(str)
-            hadir=len(df_g[df_g['STATUS']=='H'])
-            total_lembur=pd.to_numeric(df_g['JAM LEMBUR'],errors='coerce').fillna(0).sum()
-            shift_malam=len(df_g[df_g['SHIFT'].str.contains('S2|S3|LS1|LS2', na=False)])
-            hari_lembur=len(df_g[pd.to_numeric(df_g['JAM LEMBUR'],errors='coerce').fillna(0)>0])
-            gaji_pokok=5252909; uang_makan=hadir*9500; uang_lembur=total_lembur*30000; uang_shift=shift_malam*2187; uang_makan_lembur=hari_lembur*9500
-            total_pend=gaji_pokok+50000+uang_makan+uang_lembur+uang_shift+uang_makan_lembur+3500+12606+15758+194357+105058+210116
+            df_g['JAM MASUK']=df_g['JAM MASUK'].astype(str)
+            df_g['JAM PULANG']=df_g['JAM PULANG'].astype(str)
+            # HANYA YANG LENGKAP
+            df_complete = df_g[
+                (df_g['JAM MASUK'].str.strip()!="") & (~df_g['JAM MASUK'].isin(["0","0.00","nan","None",""] )) &
+                (df_g['JAM PULANG'].str.strip()!="") & (~df_g['JAM PULANG'].isin(["0","0.00","nan","None",""] ))
+            ].copy()
+            df_incomplete = df_g[~df_g.index.isin(df_complete.index)]
+            if not df_incomplete.empty:
+                st.error(f"⚠️ {len(df_incomplete)} data UNDEFINED tidak dihitung hadir:")
+                st.dataframe(df_incomplete[['TANGGAL MASUK','JAM MASUK','JAM PULANG','KETERANGAN']], use_container_width=True)
+
+            df_complete['SHIFT']=df_complete['SHIFT'].fillna('').astype(str)
+            hadir_valid = len(df_complete[df_complete['STATUS']=='H'])
+            total_lembur=pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0).sum()
+            shift_malam=len(df_complete[df_complete['SHIFT'].str.contains('S2|S3|LS1|LS2', na=False)])
+            hari_lembur=len(df_complete[pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0)>0])
+
+            uang_makan = hadir_valid * 9500
+            uang_transport = hadir_valid * 9500 # HARI SAMA!
+
+            uang_lembur=total_lembur*30000
+            uang_shift=shift_malam*2187
+            uang_makan_lembur=hari_lembur*9500
+            gaji_pokok=5252909
+            total_pend=gaji_pokok+50000+uang_makan+uang_transport+uang_lembur+uang_shift+uang_makan_lembur+3500+12606+15758+194357+105058+210116
             total_pot=12606+15758+194357+105058+210116+105058+52529+52529
             total_gaji=total_pend-total_pot
-            st.dataframe(df_g, use_container_width=True)
-            c1,c2,c3=st.columns(3); c1.metric("Hadir", hadir); c2.metric("Lembur", f"{total_lembur:.2f}"); c3.metric("TOTAL PAYROLL", f"Rp {int(total_gaji):,}")
+
+            st.dataframe(df_complete.sort_values('TGL_DT',ascending=False), use_container_width=True)
+            c1,c2,c3,c4=st.columns(4)
+            c1.metric("Hadir Valid", hadir_valid)
+            c2.metric("Uang Makan", f"{hadir_valid} Hari")
+            c3.metric("Uang Transport", f"{hadir_valid} Hari", "SAMA ✅")
+            c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
+
             try:
-                ws_gaji.batch_update([{'range':'B5','values':[[f"{hadir} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},{'range':'B7','values':[[f"{total_lembur:.2f} Jam x 30000"]]},{'range':'C7','values':[[int(uang_lembur)]]},{'range':'B8','values':[[f"{shift_malam} Hari x 2187"]]},{'range':'C8','values':[[int(uang_shift)]]},{'range':'B9','values':[[f"{hari_lembur} Hari x 9500"]]},{'range':'C9','values':[[int(uang_makan_lembur)]]},{'range':'C17','values':[[int(total_pend)]]},{'range':'E17','values':[[int(total_pot)]]},{'range':'C19','values':[[int(total_gaji)]]}])
-                st.success(f"✅ PAYROLL Rp {int(total_gaji):,} Updated"); st.balloons()
+                ws_gaji.batch_update([
+                    {'range':'B5','values':[[f"{hadir_valid} Hari x 9500"]]},
+                    {'range':'C5','values':[[int(uang_makan)]]},
+                    {'range':'B6','values':[[f"{hadir_valid} Hari x 9500"]]},
+                    {'range':'C6','values':[[int(uang_transport)]]},
+                    {'range':'B7','values':[[f"{total_lembur:.2f} Jam x 30000"]]},
+                    {'range':'C7','values':[[int(uang_lembur)]]},
+                    {'range':'B8','values':[[f"{shift_malam} Hari x 2187"]]},
+                    {'range':'C8','values':[[int(uang_shift)]]},
+                    {'range':'B9','values':[[f"{hari_lembur} Hari x 9500"]]},
+                    {'range':'C9','values':[[int(uang_makan_lembur)]]},
+                    {'range':'C17','values':[[int(total_pend)]]},
+                    {'range':'E17','values':[[int(total_pot)]]},
+                    {'range':'C19','values':[[int(total_gaji)]]}
+                ])
+                st.success(f"✅ PAYROLL Rp {int(total_gaji):,} - Makan {hadir_valid} & Transport {hadir_valid} SAMA!"); st.balloons()
             except Exception as e: st.error(f"Error: {e}")
