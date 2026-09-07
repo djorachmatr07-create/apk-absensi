@@ -56,9 +56,12 @@ def is_missing(jam): return str(jam).strip() in ["","0","0.00","00:00:00","nan",
 def is_libur_row(row):
     ket=str(row.get('KETERANGAN','')).upper()
     status=str(row.get('STATUS','')).upper()
-    return status=='L' or 'MINGGU' in ket or 'LIBUR' in ket
+    return status in ['L','C'] or 'CUTI' in ket or 'IZIN CUTI' in ket or 'MINGGU' in ket or 'LIBUR' in ket
 def is_undefined_row(row):
     if is_libur_row(row): return False
+    status=str(row.get('STATUS','')).upper()
+    ket=str(row.get('KETERANGAN','')).upper()
+    if 'DINAS' in ket or 'WFH' in ket or 'RUMAH' in ket or status in ['DL','WFH']: return False
     jm_missing=is_missing(row.get('JAM MASUK',''))
     jp_missing=is_missing(row.get('JAM PULANG',''))
     ket=str(row.get('KETERANGAN','')).upper()
@@ -103,7 +106,7 @@ def hitung_final(masuk_dt,pulang_dt,status_input):
     if 6 <= hm < 14: base='S1'
     elif 14 <= hm < 22: base='S2'
     else: base='S3'
-    shift=status_final if status_final in ['A','L'] else f"H-{base}" if jam_float<11.5 else f"H-LS1" if base=='S1' else "H-LS2"
+    shift=status_final if status_final in ['A','L','S','I','C','DL','WFH'] else f"H-{base}" if jam_float<11.5 else f"H-LS1" if base=='S1' else "H-LS2"
     return jk,jl,l15,l20,shift,ket,status_final
 
 def get_periode(bulan,tahun,mode):
@@ -227,37 +230,59 @@ with tab3:
                         fixed+=1
                 except: continue
             load_data.clear()
-            st.success(f"Selesai! Hapus {len(hapus)} | Fix {fixed} shift jadi S2 ✅"); st.balloons()
+            st.success(f"Selesai! Hapus {len(hapus)} | Fix {fixed} shift ✅"); st.balloons()
 
     st.divider()
-    st.markdown("### 📝 MENU IZIN - SAKIT / CUTI / IZIN")
+    st.markdown("### 📝 IZIN")
     id_izin = st.selectbox("Pilih Karyawan", db_df['ID KARYAWAN'].tolist(), key="id_izin")
     nama_izin = db_df[db_df['ID KARYAWAN']==id_izin]['NAMA KARYAWAN'].values[0] if id_izin in db_df['ID KARYAWAN'].values else ""
     st.info(f"👤 {id_izin} - {nama_izin}")
     c1,c2=st.columns(2)
-    with c1: tgl_mulai_izin = st.date_input("Tanggal Mulai", value=now_wib().date(), key="tgl_mulai")
-    with c2: tgl_selesai_izin = st.date_input("Tanggal Selesai", value=now_wib().date(), key="tgl_selesai")
-    jenis_izin = st.selectbox("Jenis", ["SAKIT (S)", "IZIN (I)", "CUTI (C)", "ALFA (A)", "LIBUR (L)", "TUKAR LIBUR (TL)"])
+    with c1: tgl_mulai_izin = st.date_input("Mulai", value=now_wib().date(), key="tgl_mulai")
+    with c2: tgl_selesai_izin = st.date_input("Selesai", value=now_wib().date(), key="tgl_selesai")
+    jenis_izin = st.selectbox("Jenis", ["SAKIT", "IZIN", "CUTI", "DINAS LUAR", "KERJA DIRUMAH"])
     ket_izin = st.text_input("Keterangan", placeholder="mis: Sakit demam / Cuti tahunan")
-    mapping = {"SAKIT (S)": ("S","SAKIT"), "IZIN (I)": ("I","IZIN"), "CUTI (C)": ("L","CUTI"), "ALFA (A)": ("A","ALFA"), "LIBUR (L)": ("L","LIBUR"), "TUKAR LIBUR (TL)": ("TL","TUKAR LIBUR")}
+
+    mapping = {
+        "SAKIT": ("S", "SAKIT"),
+        "IZIN": ("I", "IZIN"),
+        "CUTI": ("L", "IZIN CUTI"),
+        "DINAS LUAR": ("DL", "DINAS LUAR"),
+        "KERJA DIRUMAH": ("WFH", "KERJA DIRUMAH")
+    }
+
     if st.button("💾 SIMPAN IZIN", type="primary", use_container_width=True):
         status_code, ket_default = mapping[jenis_izin]
         ket_final = ket_izin.upper() if ket_izin else ket_default
+        # Jika user pilih CUTI tapi gak isi keterangan, paksa jadi IZIN CUTI
+        if jenis_izin == "CUTI" and "IZIN CUTI" not in ket_final:
+            ket_final = f"IZIN CUTI {ket_final}".strip() if ket_final!= "IZIN CUTI" else "IZIN CUTI"
+            if ket_final == "IZIN CUTI CUTI": ket_final = "IZIN CUTI"
         delta = (tgl_selesai_izin - tgl_mulai_izin).days
-        if delta < 0: st.error("Tanggal selesai salah!")
+        if delta < 0: st.error("Tanggal salah!")
         else:
             for d in range(delta+1):
                 tgl = tgl_mulai_izin + timedelta(days=d)
                 tgl_str = tgl.strftime('%Y-%m-%d')
                 cek = absen_df[(absen_df['ID KARYAWAN']==id_izin) & (absen_df['TANGGAL MASUK']==tgl_str)] if not absen_df.empty else pd.DataFrame()
+                if jenis_izin in ["DINAS LUAR", "KERJA DIRUMAH"]:
+                    jk_val, jl_val = "8.00", "0.00"
+                    shift_val = "H-S1"
+                    uang_val = get_uang_shift(id_izin, shift_val, 0)
+                    jam_m_val, jam_p_val = "08:00:00", "17:00:00"
+                else:
+                    jk_val, jl_val = "0.00", "0.00"
+                    shift_val = "-"
+                    uang_val = "0"
+                    jam_m_val, jam_p_val = "", ""
                 if not cek.empty:
                     rn = cek.index[0]+2
-                    ws_absen.update(f'C{rn}:N{rn}', [[tgl_str, "", tgl_str, "", "0.00","0.00","0.00","0.00","-",ket_final,status_code,"0"]])
+                    ws_absen.update(f'C{rn}:N{rn}', [[tgl_str, jam_m_val, tgl_str, jam_p_val, jk_val, jl_val,"0.00","0.00",shift_val,ket_final,status_code,uang_val]])
                 else:
-                    row_izin = [id_izin, nama_izin, tgl_str, "", tgl_str, "", "0.00","0.00","0.00","0.00","-",ket_final,status_code,"0"]
+                    row_izin = [id_izin, nama_izin, tgl_str, jam_m_val, tgl_str, jam_p_val, jk_val, jl_val,"0.00","0.00",shift_val,ket_final,status_code,uang_val]
                     ws_absen.insert_row(row_izin, 2)
             load_data.clear()
-            st.success(f"✅ Izin {jenis_izin} {tgl_mulai_izin} s/d {tgl_selesai_izin} berhasil!"); st.balloons()
+            st.success(f"✅ {jenis_izin} -> {ket_final} {tgl_mulai_izin} s/d {tgl_selesai_izin} berhasil!"); st.balloons()
 
 with tab4:
     st.markdown("#### REKAP")
@@ -274,7 +299,6 @@ with tab4:
     if not absen_df.empty:
         df_f=absen_df[(absen_df['TGL_DT']>=pd.to_datetime(awal_r))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_r))].copy()
         if not df_f.empty:
-            st.error(f"UNDEFINED {len(df_f[df_f.apply(is_undefined_row, axis=1)])} | LIBUR {len(df_f[df_f.apply(is_libur_row, axis=1)])}")
             st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
@@ -291,7 +315,7 @@ with tab5:
         if not df_g.empty:
             jml_undefined=len(df_g[df_g.apply(is_undefined_row, axis=1)]); jml_libur=len(df_g[df_g.apply(is_libur_row, axis=1)])
             df_complete=df_g[~df_g.apply(is_undefined_row, axis=1)&~df_g.apply(is_libur_row, axis=1)].copy()
-            hadir_valid=len(df_complete[df_complete['STATUS']=='H'])
+            hadir_valid=len(df_complete[df_complete['STATUS'].isin(['H','DL','WFH'])])
             total_lembur=pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0).sum()
             shift_malam=len(df_complete[df_complete['SHIFT'].str.contains('S2|S3|LS1|LS2', na=False)])
             hari_lembur=len(df_complete[pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0)>0])
@@ -325,7 +349,7 @@ with tab2:
             c1,c2=st.columns(2)
             with c1: tgl_e=st.date_input("Tgl Masuk", pd.to_datetime(row['TANGGAL MASUK']).date()); jm_e=st.time_input("Jam Masuk", datetime.strptime(row['JAM MASUK'], '%H:%M:%S').time() if not is_missing(row['JAM MASUK']) else now_wib().time())
             with c2: tgl_pe=st.date_input("Tgl Pulang", pd.to_datetime(row['TANGGAL PULANG']).date() if not is_missing(row['TANGGAL PULANG']) else pd.to_datetime(row['TANGGAL MASUK']).date()); jp_e=st.time_input("Jam Pulang", datetime.strptime(row['JAM PULANG'], '%H:%M:%S').time() if not is_missing(row['JAM PULANG']) else now_wib().time())
-            st_e=st.selectbox("Status", ["H","GH","GHS","A","L","I","S","TL"])
+            st_e=st.selectbox("Status", ["H","GH","GHS","A","L","I","S","TL","DL","WFH"])
             if st.button("UPDATE", type="primary", use_container_width=True):
                 masuk_dt=datetime.combine(tgl_e, jm_e); pulang_dt=datetime.combine(tgl_pe, jp_e)
                 jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,st_e)
