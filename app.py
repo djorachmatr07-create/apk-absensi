@@ -56,7 +56,7 @@ def is_missing(jam): return str(jam).strip() in ["","0","0.00","00:00:00","nan",
 def is_libur_row(row):
     ket=str(row.get('KETERANGAN','')).upper()
     status=str(row.get('STATUS','')).upper()
-    return status in ['L','C'] or 'CUTI' in ket or 'IZIN CUTI' in ket or 'MINGGU' in ket or 'LIBUR' in ket
+    return status in ['L','C'] or 'IZIN CUTI' in ket or 'CUTI' in ket or 'MINGGU' in ket or 'LIBUR' in ket
 def is_undefined_row(row):
     if is_libur_row(row): return False
     status=str(row.get('STATUS','')).upper()
@@ -169,13 +169,26 @@ with tab1:
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
+
     ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
     today_wib = now_wib().date()
-    row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_wib.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
+
+    # FIX JAM MANUAL MUNCUL LAGI
+    if ubah_manual:
+        c1,c2=st.columns(2)
+        with c1: tgl_m_input=st.date_input("TANGGAL MASUK", value=today_wib, key="tgl_m_fix")
+        with c2: jam_m_input=st.time_input("JAM MASUK", value=now_wib().time(), key="jam_m_fix")
+        row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==tgl_m_input.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
+    else:
+        tgl_m_input=today_wib
+        jam_m_input=now_wib().time()
+        row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_wib.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
+
     if row_today.empty:
-        if ubah_manual:
-            c1,c2=st.columns(2); tgl_m=c1.date_input("TANGGAL MASUK", value=today_wib, key="tgl_m"); jam_m=c2.time_input("JAM MASUK", value=now_wib().time(), key="jam_m")
-        else: tgl_m=today_wib; jam_m=now_wib().time()
+        if not ubah_manual:
+            tgl_m=today_wib; jam_m=now_wib().time()
+        else:
+            tgl_m=tgl_m_input; jam_m=jam_m_input
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
             if not ubah_manual: klik_wib=now_wib(); tgl_m=klik_wib.date(); jam_m=klik_wib.time()
             row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),datetime.combine(tgl_m, jam_m).strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED","H","0"]
@@ -185,8 +198,11 @@ with tab1:
         if is_missing(r['JAM PULANG']):
             st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - UNDEFINED")
             if ubah_manual:
-                c1,c2=st.columns(2); tgl_p=c1.date_input("TANGGAL PULANG", value=today_wib, key="tgl_p"); jam_p=c2.time_input("JAM PULANG", value=now_wib().time(), key="jam_p")
-            else: tgl_p=today_wib; jam_p=now_wib().time()
+                c1,c2=st.columns(2)
+                with c1: tgl_p=st.date_input("TANGGAL PULANG", value=pd.to_datetime(r['TANGGAL MASUK']).date(), key="tgl_p_fix")
+                with c2: jam_p=st.time_input("JAM PULANG", value=now_wib().time(), key="jam_p_fix")
+            else:
+                tgl_p=today_wib; jam_p=now_wib().time()
             if st.button("🔴 PULANG SEKARANG", type="primary", use_container_width=True):
                 if not ubah_manual:
                     klik_wib=now_wib(); tgl_p=klik_wib.date(); jam_p=klik_wib.time()
@@ -200,7 +216,10 @@ with tab1:
                 rn=row_today.index[0]+2
                 ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],r['JAM MASUK'],tgl_p.strftime('%Y-%m-%d'),jam_p.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
                 load_data.clear(); st.success(f"PULANG {jk} jam"); st.balloons(); st.rerun()
-        else: st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']}")
+        else:
+            st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']}")
+            if ubah_manual:
+                st.info("Udah absen di tanggal ini. Ganti tanggal di atas buat absen tanggal lain!")
 
 with tab3:
     st.markdown("#### ADMIN")
@@ -230,7 +249,7 @@ with tab3:
                         fixed+=1
                 except: continue
             load_data.clear()
-            st.success(f"Selesai! Hapus {len(hapus)} | Fix {fixed} shift ✅"); st.balloons()
+            st.success(f"Selesai! Hapus {len(hapus)} | Fix {fixed} shift S2 ✅"); st.balloons()
 
     st.divider()
     st.markdown("### 📝 IZIN")
@@ -242,7 +261,6 @@ with tab3:
     with c2: tgl_selesai_izin = st.date_input("Selesai", value=now_wib().date(), key="tgl_selesai")
     jenis_izin = st.selectbox("Jenis", ["SAKIT", "IZIN", "CUTI", "DINAS LUAR", "KERJA DIRUMAH"])
     ket_izin = st.text_input("Keterangan", placeholder="mis: Sakit demam / Cuti tahunan")
-
     mapping = {
         "SAKIT": ("S", "SAKIT"),
         "IZIN": ("I", "IZIN"),
@@ -250,14 +268,12 @@ with tab3:
         "DINAS LUAR": ("DL", "DINAS LUAR"),
         "KERJA DIRUMAH": ("WFH", "KERJA DIRUMAH")
     }
-
     if st.button("💾 SIMPAN IZIN", type="primary", use_container_width=True):
         status_code, ket_default = mapping[jenis_izin]
         ket_final = ket_izin.upper() if ket_izin else ket_default
-        # Jika user pilih CUTI tapi gak isi keterangan, paksa jadi IZIN CUTI
         if jenis_izin == "CUTI" and "IZIN CUTI" not in ket_final:
-            ket_final = f"IZIN CUTI {ket_final}".strip() if ket_final!= "IZIN CUTI" else "IZIN CUTI"
-            if ket_final == "IZIN CUTI CUTI": ket_final = "IZIN CUTI"
+            ket_final = f"IZIN CUTI {ket_final}".replace("IZIN CUTI CUTI","IZIN CUTI").strip()
+            if ket_final in ["CUTI","IZIN"]: ket_final="IZIN CUTI"
         delta = (tgl_selesai_izin - tgl_mulai_izin).days
         if delta < 0: st.error("Tanggal salah!")
         else:
