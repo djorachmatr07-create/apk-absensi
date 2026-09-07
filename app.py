@@ -160,12 +160,12 @@ with tab1:
     components.html("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Black+Ops+One&display=swap');
-   .clock-box {
+  .clock-box {
         background: linear-gradient(145deg, #0a0a0a 0%, #1e1e1e 50%, #0a0a0a 100%);
         border-radius:16px; padding:20px; border:1px solid #333;
         text-align:center; box-shadow: 0 0 40px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.1);
     }
-   .nexa-title {
+ .nexa-title {
         font-family:'Black Ops One', cursive;
         font-size:32px;
         background: linear-gradient(to bottom, #fff 0%, #aaa 45%, #fff 50%, #666 100%);
@@ -175,24 +175,29 @@ with tab1:
         filter: drop-shadow(0 0 15px rgba(255,255,255,0.4)) drop-shadow(0 3px 0 #000);
         margin-bottom:10px;
     }
-   .label { color:#555; font-size:10px; letter-spacing:4px; font-weight:800; margin-bottom:8px; }
+ .label-blink {
+        color:#facc15;
+        font-size:10px; letter-spacing:4px; font-weight:800; margin-bottom:8px;
+        animation: blinkText 0.8s infinite steps(1);
+    }
+    @keyframes blinkText {
+        0% { opacity:1; color:#facc15; text-shadow:0 0 8px #facc15; }
+        50% { opacity:0.3; color:#ef4444; text-shadow:0 0 8px #ef4444; }
+    }
     #clock {
         font-family:'Orbitron', monospace;
         font-size:48px; font-weight:900;
         letter-spacing:6px;
-        animation: yellowRed 0.7s infinite steps(1);
-    }
-    @keyframes yellowRed {
-        0% { color:#fde047; text-shadow: 0 0 10px #facc15, 0 0 25px #eab308, 0 0 50px #ca8a04; }
-        50% { color:#ff1a1a; text-shadow: 0 0 10px #ef4444, 0 0 25px #dc2626, 0 0 50px #991b1b; }
+        color:#fde047;
+        text-shadow: 0 0 12px #facc15, 0 0 25px #eab308, 0 0 50px #ca8a04;
     }
     #date { color:#777; font-size:12px; margin-top:8px; letter-spacing:1px; }
-   .dot { display:inline-block; width:9px; height:9px; background:#facc15; border-radius:50%; animation: dotBlink 0.7s infinite steps(1); margin-right:7px; }
-    @keyframes dotBlink { 0% { background:#facc15; box-shadow:0 0 12px #facc15; } 50% { background:#ef4444; box-shadow:0 0 12px #ef4444; } }
+ .dot { display:inline-block; width:9px; height:9px; background:#facc15; border-radius:50%; animation: dotBlink 0.8s infinite steps(1); margin-right:7px; }
+    @keyframes dotBlink { 0% { background:#facc15; box-shadow:0 0 12px #facc15; opacity:1; } 50% { background:#ef4444; box-shadow:0 0 12px #ef4444; opacity:0.3; } }
     </style>
     <div class="clock-box">
         <div class="nexa-title">⚡ NEXA PRO</div>
-        <div class="label"><span class="dot"></span>WAKTU REALTIME WIB</div>
+        <div class="label-blink"><span class="dot"></span>WAKTU REALTIME WIB</div>
         <div id="clock">--:--:--</div>
         <div id="date">Loading...</div>
     </div>
@@ -214,19 +219,43 @@ with tab1:
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
+
+    # CEKLIS MANUAL BALIK LAGI MIN
+    ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
+
     today_wib = now_wib().date()
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_wib.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
+
     if row_today.empty:
+        if ubah_manual:
+            c1,c2=st.columns(2)
+            tgl_m=c1.date_input("TANGGAL MASUK", value=today_wib, key="tgl_m")
+            jam_m=c2.time_input("JAM MASUK", value=now_wib().time(), key="jam_m")
+        else:
+            tgl_m=today_wib; jam_m=now_wib().time()
+
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
-            klik_wib = now_wib(); tgl_m = klik_wib.date(); jam_m = klik_wib.time()
+            if not ubah_manual:
+                klik_wib = now_wib(); tgl_m = klik_wib.date(); jam_m = klik_wib.time()
             row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),datetime.combine(tgl_m, jam_m).strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED","H","0"]
             ws_absen.insert_row(row,2); load_data.clear(); st.balloons(); st.rerun()
     else:
         r=row_today.iloc[0]
         if is_missing(r['JAM PULANG']):
             st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - UNDEFINED")
+            if ubah_manual:
+                c1,c2=st.columns(2)
+                tgl_p=c1.date_input("TANGGAL PULANG", value=today_wib, key="tgl_p")
+                jam_p=c2.time_input("JAM PULANG", value=now_wib().time(), key="jam_p")
+            else:
+                tgl_p=today_wib; jam_p=now_wib().time()
+
             if st.button("🔴 PULANG SEKARANG", type="primary", use_container_width=True):
-                klik_wib = now_wib(); tgl_p = klik_wib.date(); jam_p = klik_wib.time()
+                if not ubah_manual:
+                    klik_wib = now_wib(); tgl_p = klik_wib.date(); jam_p = klik_wib.time()
+                    try:
+                        if jam_p < datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time(): tgl_p = tgl_p + timedelta(days=1)
+                    except: pass
                 masuk_dt=datetime.combine(datetime.strptime(r['TANGGAL MASUK'], '%Y-%m-%d').date(), datetime.strptime(r['JAM MASUK'], '%H:%M:%S').time())
                 pulang_dt=datetime.combine(tgl_p, jam_p)
                 jk,jl,l15,l20,shift,ket,status_final=hitung_final(masuk_dt,pulang_dt,r['STATUS'])
@@ -254,7 +283,7 @@ with tab4:
         if not df_f.empty:
             jml_undefined = len(df_f[df_f.apply(is_undefined_row, axis=1)])
             jml_libur = len(df_f[df_f.apply(is_libur_row, axis=1)])
-            if jml_undefined>0: st.error(f"UNDEFINED {jml_undefined} | LIBUR {jml_libur}")
+            st.error(f"UNDEFINED {jml_undefined} | LIBUR {jml_libur}")
             st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
