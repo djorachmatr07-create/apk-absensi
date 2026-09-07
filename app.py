@@ -14,7 +14,7 @@ st.markdown("""
 .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
-<div class='sub-title'>SMART HR SYSTEM • AUTO WIB • V22 FINAL</div>
+<div class='sub-title'>SMART HR SYSTEM • V23 FINAL PDF LENGKAP</div>
 """, unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
@@ -109,33 +109,87 @@ def get_periode(bulan,tahun,mode):
         if bulan==1: return date(tahun-1,12,21), date(tahun,1,20)
         else: return date(tahun,bulan-1,21), date(tahun,bulan,20)
 
-def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, uang_makan, uang_transport, total_lembur, uang_lembur, shift_malam, uang_shift, hari_lembur, uang_makan_lembur, total_gaji):
+def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, uang_makan, uang_transport, total_lembur, uang_lembur, shift_malam, uang_shift, hari_lembur, uang_makan_lembur, total_pendapatan, total_potongan, total_gaji):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, 'SLIP GAJI - NEXA PRO', 0, 1, 'C')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 6, f'Periode: {periode_awal} s/d {periode_akhir}', 0, 1, 'C')
-    pdf.ln(5)
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 7, f'ID: {id_kar} - {nama}', 0, 1, 'L')
+    pdf.set_font("Arial", '', 9)
+    pdf.cell(0, 5, f'Periode: {periode_awal} s/d {periode_akhir}', 0, 1, 'C')
     pdf.ln(2)
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 7, 'PENDAPATAN:', 0, 1, 'L')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(95, 7, 'Gaji Pokok', border=1); pdf.cell(95, 7, 'Rp 5,252,909', border=1, ln=1)
-    pdf.cell(95, 7, 'Premi Hadir', border=1); pdf.cell(95, 7, 'Rp 50,000', border=1, ln=1)
-    pdf.cell(95, 7, f'Uang Makan ({hadir_valid} Hari x 9500)', border=1); pdf.cell(95, 7, f'Rp {uang_makan:,}', border=1, ln=1)
-    pdf.cell(95, 7, f'Uang Transport ({hadir_valid} Hari x 0)', border=1); pdf.cell(95, 7, f'Rp {uang_transport:,}', border=1, ln=1)
-    pdf.cell(95, 7, f'Uang Lembur ({total_lembur:.2f} Jam)', border=1); pdf.cell(95, 7, f'Rp {int(uang_lembur):,}', border=1, ln=1)
-    pdf.cell(95, 7, f'Uang Shift ({shift_malam} Hari)', border=1); pdf.cell(95, 7, f'Rp {int(uang_shift):,}', border=1, ln=1)
-    pdf.cell(95, 7, f'Uang Makan Lembur ({hari_lembur} Hari)', border=1); pdf.cell(95, 7, f'Rp {int(uang_makan_lembur):,}', border=1, ln=1)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(0, 6, f'ID: {id_kar} - {nama}', 0, 1, 'L')
+    pdf.ln(2)
+
+    # PENDAPATAN LENGKAP
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_fill_color(0,100,0)
+    pdf.set_text_color(255,255,255)
+    pdf.cell(0, 7, ' PENDAPATAN', 1, 1, 'L', True)
+    pdf.set_text_color(0,0,0)
+    pdf.set_font("Arial", '', 9)
+    tunj_loyal=3500; jkk=12606; jkm=15758; jht_per=194357; jp_per=105058; bpjs_per=210116
+    pend=[
+        (f"Gaji Pokok", 5252909),
+        (f"Premi Hadir", 50000),
+        (f"Uang Makan ({hadir_valid} Hari x 9500)", uang_makan),
+        (f"Uang Transport ({hadir_valid} Hari x 0)", uang_transport),
+        (f"Uang Lembur ({total_lembur:.2f} Jam x 30000)", int(uang_lembur)),
+        (f"Uang Shift ({shift_malam} Hari x 2187)", int(uang_shift)),
+        (f"Uang Makan Lembur ({hari_lembur} Hari x 9500)", int(uang_makan_lembur)),
+        (f"Tunjangan Loyalitas", tunj_loyal),
+        (f"JKK (0.24%)", jkk),
+        (f"JKM (0.30%)", jkm),
+        (f"JHT Perusahaan (3.7%)", jht_per),
+        (f"JP Perusahaan (2%)", jp_per),
+        (f"BPJS Kes Perusahaan (4%)", bpjs_per),
+    ]
+    for n,v in pend:
+        pdf.cell(115, 6, f" {n}", border=1)
+        pdf.cell(0, 6, f" Rp {v:,}", border=1, ln=1)
+    pdf.set_font("Arial", 'B', 9)
+    pdf.set_fill_color(220,220,220)
+    pdf.cell(115, 7, ' TOTAL PENDAPATAN', 1, 0, 'L', True)
+    pdf.cell(0, 7, f' Rp {int(total_pendapatan):,}', 1, 1, 'L', True)
     pdf.ln(3)
+
+    # POTONGAN LENGKAP
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_fill_color(150,0,0)
+    pdf.set_text_color(255,255,255)
+    pdf.cell(0, 7, ' POTONGAN', 1, 1, 'L', True)
+    pdf.set_text_color(0,0,0)
+    pdf.set_font("Arial", '', 9)
+    jht_tk=105058; jp_tk=52529; bpjs_kar=52529
+    pot=[
+        (f"JKK (0.24%)", jkk),
+        (f"JKM (0.30%)", jkm),
+        (f"JHT Perusahaan (3.7%)", jht_per),
+        (f"JP Perusahaan (2%)", jp_per),
+        (f"BPJS Kes Perusahaan (4%)", bpjs_per),
+        (f"JHT TK (2%)", jht_tk),
+        (f"JP TK (1%)", jp_tk),
+        (f"BPJS Kes Karyawan (1%)", bpjs_kar),
+    ]
+    for n,v in pot:
+        pdf.cell(115, 6, f" {n}", border=1)
+        pdf.cell(0, 6, f" Rp {v:,}", border=1, ln=1)
+    pdf.set_font("Arial", 'B', 9)
+    pdf.set_fill_color(220,220,220)
+    pdf.cell(115, 7, ' TOTAL POTONGAN', 1, 0, 'L', True)
+    pdf.cell(0, 7, f' Rp {int(total_potongan):,}', 1, 1, 'L', True)
+    pdf.ln(4)
+
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(95, 8, 'TOTAL GAJI BERSIH:', border=1); pdf.cell(95, 8, f'Rp {int(total_gaji):,}', border=1, ln=1)
-    pdf.ln(5)
-    pdf.set_font("Arial", 'I', 8)
-    pdf.cell(0, 5, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} - UNDEFINED tidak dihitung', 0, 1, 'C')
+    pdf.set_fill_color(0,0,0)
+    pdf.set_text_color(255,255,0)
+    pdf.cell(115, 9, ' TOTAL GAJI BERSIH', 1, 0, 'L', True)
+    pdf.cell(0, 9, f' Rp {int(total_gaji):,}', 1, 1, 'L', True)
+    pdf.ln(3)
+    pdf.set_text_color(0,0,0)
+    pdf.set_font("Arial", 'I', 7)
+    pdf.cell(0, 4, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} | UNDEFINED tidak dihitung | Hari Makan=Transport={hadir_valid} hari', 0, 1, 'C')
     return bytes(pdf.output())
 
 tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
@@ -162,7 +216,6 @@ with tab1:
     updateClock();
     </script>
     """, height=110)
-
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
@@ -170,7 +223,6 @@ with tab1:
     today_wib = now_wib().date()
     today_str = today_wib.strftime('%Y-%m-%d')
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_str)&(absen_df['JAM MASUK']!="")] if not absen_df.empty else pd.DataFrame()
-
     if row_today.empty:
         if ubah_manual:
             status_pilih=st.selectbox("Status", ["H","GH","GHS","I","S","A"], key="st_masuk")
@@ -188,15 +240,14 @@ with tab1:
                 if len(r)>2 and r[0]==id_in and r[2]==tgl_m.strftime('%Y-%m-%d') and r[3]=="":
                     ws_absen.delete_rows(i); break
             masuk_dt=datetime.combine(tgl_m, jam_m)
-            # FIX V22 - CUMA UNDEFINED & OTOMATIS MASUK GSHEET
             row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED","H","0"]
             ws_absen.insert_row(row,2)
             load_data.clear()
-            st.success(f"✅ MASUK {tgl_m} {jam_m.strftime('%H:%M:%S')} WIB - UNDEFINED otomatis masuk Sheet"); st.balloons(); st.rerun()
+            st.success(f"✅ MASUK {tgl_m} {jam_m.strftime('%H:%M:%S')} WIB - UNDEFINED masuk Sheet"); st.balloons(); st.rerun()
     else:
         r=row_today.iloc[0]
         if r['JAM PULANG']=="" or r['JAM PULANG'] in ["0.00","0","nan","None"]:
-            st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - Status: UNDEFINED")
+            st.warning(f"✅ Masuk {r['TANGGAL MASUK']} {r['JAM MASUK']} - UNDEFINED")
             if ubah_manual:
                 c1,c2=st.columns(2)
                 tgl_p=c1.date_input("TANGGAL PULANG", value=today_wib, key="tgl_p")
@@ -215,7 +266,7 @@ with tab1:
                 uang=get_uang_shift(id_in, shift, float(jl))
                 rn=row_today.index[0]+2
                 ws_absen.update(f'C{rn}:N{rn}', [[r['TANGGAL MASUK'],r['JAM MASUK'],tgl_p.strftime('%Y-%m-%d'),jam_p.strftime('%H:%M:%S'),jk,jl,l15,l20,shift,ket,status_final,uang]])
-                load_data.clear(); st.success(f"✅ PULANG {jk} jam - {ket} - Otomatis update Sheet"); st.balloons(); st.rerun()
+                load_data.clear(); st.success(f"✅ PULANG {jk} jam - {ket}"); st.balloons(); st.rerun()
         else:
             st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']} | {r['SHIFT']}")
 
@@ -262,7 +313,7 @@ with tab3:
                 if d.weekday()==6:
                     ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","L","MINGGU","L","0"],2); cnt+=1
                 elif ds in LIBUR_NASIONAL:
-                    ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","0.00","0.00","L",f"LIBUR NASIONAL {LIBUR_NASIONAL[ds]}","L","0"],2); cnt+=1
+                    ws_absen.insert_row(["01213027","RACHMAT RAHARDJO",ds,"",ds,"","0.00","0.00","L",f"LIBUR NASIONAL {LIBUR_NASIONAL[ds]}","L","0"],2); cnt+=1
             d+=timedelta(days=1)
         load_data.clear(); st.success(f"Generate {cnt}"); st.balloons(); st.rerun()
 
@@ -286,7 +337,7 @@ with tab4:
             st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
-    st.markdown("#### PAYROLL + DOWNLOAD PDF")
+    st.markdown("#### PAYROLL + PDF LENGKAP")
     mode_g=st.radio("Mode Gaji", ["21-20 Payroll","Bulan Kalender"], horizontal=True, key="mode_g")
     c1,c2=st.columns(2)
     with c1: bulan_g=st.selectbox("Bulan Gaji", list(range(1,13)), index=now_wib().month-1, key="bulan_g")
@@ -318,9 +369,11 @@ with tab5:
             uang_lembur=total_lembur*30000
             uang_shift=shift_malam*2187
             uang_makan_lembur=hari_lembur*9500
-            gaji_pokok=5252909
-            total_pend=gaji_pokok+50000+uang_makan+uang_transport+uang_lembur+uang_shift+uang_makan_lembur+3500+12606+15758+194357+105058+210116
-            total_pot=12606+15758+194357+105058+210116+105058+52529+52529
+
+            gaji_pokok=5252909; tunj_loyal=3500; jkk=12606; jkm=15758; jht_per=194357; jp_per=105058; bpjs_per=210116
+            total_pend=gaji_pokok+50000+uang_makan+uang_transport+uang_lembur+uang_shift+uang_makan_lembur+tunj_loyal+jkk+jkm+jht_per+jp_per+bpjs_per
+            jht_tk=105058; jp_tk=52529; bpjs_kar=52529
+            total_pot=jkk+jkm+jht_per+jp_per+bpjs_per+jht_tk+jp_tk+bpjs_kar
             total_gaji=total_pend-total_pot
 
             st.session_state['payroll_data']={
@@ -329,13 +382,17 @@ with tab5:
                 'total_lembur':total_lembur,'uang_lembur':uang_lembur,
                 'shift_malam':shift_malam,'uang_shift':uang_shift,
                 'hari_lembur':hari_lembur,'uang_makan_lembur':uang_makan_lembur,
-                'total_gaji':total_gaji
+                'total_pendapatan':total_pend,'total_potongan':total_pot,'total_gaji':total_gaji
             }
             st.session_state['payroll_ready']=True
             st.dataframe(df_complete.sort_values('TGL_DT',ascending=False), use_container_width=True)
             c1,c2,c3,c4=st.columns(4)
             c1.metric("Hadir Valid", hadir_valid); c2.metric("Makan", f"{hadir_valid} Hari"); c3.metric("Transport", f"{hadir_valid} Hari x 0"); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
-
+            st.markdown(f"""
+            **PENDAPATAN:** Rp {int(total_pend):,}
+            **POTONGAN:** Rp {int(total_pot):,}
+            **BERSIH:** Rp {int(total_gaji):,}
+            """)
             try:
                 ws_gaji.batch_update([
                     {'range':'B5','values':[[f"{hadir_valid} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},
@@ -356,10 +413,10 @@ with tab5:
             d['total_lembur'], d['uang_lembur'],
             d['shift_malam'], d['uang_shift'],
             d['hari_lembur'], d['uang_makan_lembur'],
-            d['total_gaji']
+            d['total_pendapatan'], d['total_potongan'], d['total_gaji']
         )
         st.download_button(
-            label="📄 DOWNLOAD PDF PAYROLL",
+            label="📄 DOWNLOAD PDF PAYROLL LENGKAP",
             data=pdf_bytes,
             file_name=f"PAYROLL_{d['id_kar']}_{d['awal']}_{d['akhir']}.pdf",
             mime="application/pdf",
