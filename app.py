@@ -99,7 +99,6 @@ def hitung_final(masuk_dt,pulang_dt,status_input):
     jk,jl,l15,l20=hitung_lembur_bulat(jam_float, masuk_dt.weekday()==5, masuk_dt.weekday()==6, tgl_str in LIBUR_NASIONAL, status_input)
     ket="MINGGU" if masuk_dt.weekday()==6 else "SABTU" if masuk_dt.weekday()==5 else "MASUK"
     if tgl_str in LIBUR_NASIONAL: ket=f"LIBUR NASIONAL {LIBUR_NASIONAL[tgl_str]}"
-    # FIX SHIFT S2 - 14:00 sd 21:59 auto S2 biar 14:54 kebaca S2
     hm=masuk_dt.hour + masuk_dt.minute/60.0
     if 6 <= hm < 14: base='S1'
     elif 14 <= hm < 22: base='S2'
@@ -114,7 +113,7 @@ def get_periode(bulan,tahun,mode):
         else: return date(tahun,bulan-1,21), date(tahun,bulan,20)
 
 def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, uang_makan, uang_transport, total_lembur, uang_lembur, shift_malam, uang_shift, hari_lembur, uang_makan_lembur, total_pendapatan, total_potongan, total_gaji, jml_undefined, jml_libur):
-    pdf = FPDF(); pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
+    pdf=FPDF(); pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, 'SLIP GAJI - SMART HR SYSTEM', 0, 1, 'C')
     pdf.set_font("Arial", '', 9); pdf.cell(0, 5, f'Periode: {periode_awal} s/d {periode_akhir} | Hadir {hadir_valid} | UNDEFINED {jml_undefined} | Libur {jml_libur}', 0, 1, 'C')
     pdf.ln(2); pdf.set_font("Arial", 'B', 10); pdf.cell(0, 6, f'ID: {id_kar} - {nama}', 0, 1, 'L'); pdf.ln(2)
@@ -138,7 +137,7 @@ with tab1:
     components.html("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap');
-.clock-box{ background: radial-gradient(circle at center, #111 0%, #000 100%); border-radius:18px; padding:22px; border:1.5px solid #222; text-align:center; box-shadow: 0 0 40px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,0.1); }
+.clock-box{ background: radial-gradient(circle at center, #111 0%, #000 100%); border-radius:18px; padding:22px; border:1.5px solid #222; text-align:center; }
 .smart-title{ font-family:'Orbitron', sans-serif; font-size:20px; font-weight:900; color:#e5e7eb; letter-spacing:3px; display:flex; align-items:center; justify-content:center; gap:12px; }
 .petir{ color:#facc15; font-size:28px; text-shadow:0 0 10px #facc15,0 0 20px #eab308; animation:petirGlow 1s infinite alternate; }
  @keyframes petirGlow{from{text-shadow:0 0 10px #facc15;} to{text-shadow:0 0 20px #fde047,0 0 40px #facc15; transform:scale(1.1);} }
@@ -156,20 +155,11 @@ with tab1:
         <div id="date">Loading...</div>
     </div>
     <script>
-    function updateClock(){
-        const now = new Date();
-        const wib = new Date(now.toLocaleString('en-US', {timeZone: 'Asia/Jakarta'}));
-        document.getElementById('clock').innerText = String(wib.getHours()).padStart(2,'0')+':'+String(wib.getMinutes()).padStart(2,'0')+':'+String(wib.getSeconds()).padStart(2,'0');
-        document.getElementById('date').innerText = wib.toLocaleDateString('id-ID', {weekday:'long', day:'2-digit', month:'long', year:'numeric'})+' WIB';
-    }
+    function updateClock(){ const now=new Date(); const wib=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Jakarta'})); document.getElementById('clock').innerText=String(wib.getHours()).padStart(2,'0')+':'+String(wib.getMinutes()).padStart(2,'0')+':'+String(wib.getSeconds()).padStart(2,'0'); document.getElementById('date').innerText=wib.toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})+' WIB'; }
     setInterval(updateClock,1000); updateClock();
-    function speak(t){ try{ window.speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(t); u.lang='en-US'; u.rate=0.95; u.pitch=1.1; u.volume=1; const vs=window.speechSynthesis.getVoices(); const f=vs.find(v=>v.name.toLowerCase().includes('female')||v.name.includes('Samantha')||v.name.includes('Google US English')); if(f) u.voice=f; window.speechSynthesis.speak(u);}catch(e){} }
-    window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged=()=>{window.speechSynthesis.getVoices();};
-    try{
-        const pd=window.parent.document;
-        function attach(){ pd.querySelectorAll('button').forEach(b=>{ const txt=b.innerText.toUpperCase(); if(txt.includes('ABSEN MASUK')&&!b.dataset.voice){ b.dataset.voice='in'; b.addEventListener('click',()=>setTimeout(()=>speak('Login successfully'),200)); } if(txt.includes('PULANG SEKARANG')&&!b.dataset.voice){ b.dataset.voice='out'; b.addEventListener('click',()=>setTimeout(()=>speak('Logout successfully'),200)); } }); }
-        setInterval(attach,500);
-    }catch(e){}
+    function speak(t){ try{ window.speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(t); u.lang='en-US'; u.rate=0.95; u.pitch=1.1; u.volume=1; window.speechSynthesis.speak(u);}catch(e){} }
+    window.speechSynthesis.getVoices();
+    try{ const pd=window.parent.document; function attach(){ pd.querySelectorAll('button').forEach(b=>{ const txt=b.innerText.toUpperCase(); if(txt.includes('ABSEN MASUK')&&!b.dataset.voice){ b.dataset.voice='in'; b.addEventListener('click',()=>setTimeout(()=>speak('Login successfully'),200)); } if(txt.includes('PULANG SEKARANG')&&!b.dataset.voice){ b.dataset.voice='out'; b.addEventListener('click',()=>setTimeout(()=>speak('Logout successfully'),200)); } }); } setInterval(attach,500); }catch(e){}
     </script>
     """, height=165)
 
@@ -210,43 +200,64 @@ with tab1:
         else: st.success(f"✅ {r['TANGGAL MASUK']} {r['JAM MASUK']} → {r['TANGGAL PULANG']} {r['JAM PULANG']}")
 
 with tab3:
-    st.markdown("#### ADMIN - PERBAIKAN DATA")
+    st.markdown("#### ADMIN")
     if st.button("⚡ BERSIHKAN DAN PERBAIKI DATA", type="primary", use_container_width=True):
-        with st.spinner("Lagi bersihin + benerin shift S2..."):
+        with st.spinner("Bersihin + fix S2..."):
             vals=ws_absen.get_all_values()
-            # 1. Bersihkan data rusak
             hapus=[]
             for i,r in enumerate(vals[1:], start=2):
                 if len(r)<6: continue
-                jm=str(r[3]).strip() if len(r)>3 else ""
-                jp=str(r[5]).strip() if len(r)>5 else ""
-                ket=str(r[11]).strip() if len(r)>11 else ""
-                stat=str(r[12]).strip() if len(r)>12 else ""
-                if jm=="" and jp=="" and ket=="" and stat=="": hapus.append(i)
-            if hapus:
-                for row_idx in sorted(hapus, reverse=True): ws_absen.delete_rows(row_idx)
-                st.toast(f"Hapus {len(hapus)} baris kosong")
-
-            # 2. Perbaiki shift yang salah (khususnya tgl 07 yang 14:54 jadi S2)
+                if str(r[3]).strip()=="" and str(r[5]).strip()=="" and str(r[11]).strip()=="" and str(r[12]).strip()=="": hapus.append(i)
+            for row_idx in sorted(hapus, reverse=True):
+                try: ws_absen.delete_rows(row_idx)
+                except: pass
             vals=ws_absen.get_all_values()
             fixed=0
             for i,r in enumerate(vals[1:], start=2):
                 if len(r)<13: continue
                 try:
                     id_k=r[0]; tgl_m=r[2]; jam_m=r[3]; tgl_p=r[4] if len(r)>4 else tgl_m; jam_p=r[5] if len(r)>5 else ""; stat=r[12] if len(r)>12 else "H"
-                    if not jam_m or is_missing(jam_m) or not jam_p or is_missing(jam_p): continue
+                    if is_missing(jam_m) or is_missing(jam_p): continue
                     masuk_dt=datetime.strptime(f"{tgl_m} {jam_m}", "%Y-%m-%d %H:%M:%S")
                     pulang_dt=datetime.strptime(f"{tgl_p} {jam_p}", "%Y-%m-%d %H:%M:%S")
                     jk,jl,l15,l20,shift_baru,ket_baru,status_final=hitung_final(masuk_dt,pulang_dt,stat)
-                    shift_lama=r[10] if len(r)>10 else ""
-                    if shift_baru!= shift_lama:
+                    if shift_baru!=r[10]:
                         uang=get_uang_shift(id_k, shift_baru, float(jl) if jl else 0)
                         ws_absen.update(f'G{i}:N{i}', [[jk,jl,l15,l20,shift_baru,ket_baru,status_final,uang]])
                         fixed+=1
                 except: continue
             load_data.clear()
-            st.success(f"Selesai! Hapus {len(hapus)} baris kosong | Perbaiki {fixed} shift (tgl 07 jadi H-S2) ✅")
-            st.balloons()
+            st.success(f"Selesai! Hapus {len(hapus)} | Fix {fixed} shift jadi S2 ✅"); st.balloons()
+
+    st.divider()
+    st.markdown("### 📝 MENU IZIN - SAKIT / CUTI / IZIN")
+    id_izin = st.selectbox("Pilih Karyawan", db_df['ID KARYAWAN'].tolist(), key="id_izin")
+    nama_izin = db_df[db_df['ID KARYAWAN']==id_izin]['NAMA KARYAWAN'].values[0] if id_izin in db_df['ID KARYAWAN'].values else ""
+    st.info(f"👤 {id_izin} - {nama_izin}")
+    c1,c2=st.columns(2)
+    with c1: tgl_mulai_izin = st.date_input("Tanggal Mulai", value=now_wib().date(), key="tgl_mulai")
+    with c2: tgl_selesai_izin = st.date_input("Tanggal Selesai", value=now_wib().date(), key="tgl_selesai")
+    jenis_izin = st.selectbox("Jenis", ["SAKIT (S)", "IZIN (I)", "CUTI (C)", "ALFA (A)", "LIBUR (L)", "TUKAR LIBUR (TL)"])
+    ket_izin = st.text_input("Keterangan", placeholder="mis: Sakit demam / Cuti tahunan")
+    mapping = {"SAKIT (S)": ("S","SAKIT"), "IZIN (I)": ("I","IZIN"), "CUTI (C)": ("L","CUTI"), "ALFA (A)": ("A","ALFA"), "LIBUR (L)": ("L","LIBUR"), "TUKAR LIBUR (TL)": ("TL","TUKAR LIBUR")}
+    if st.button("💾 SIMPAN IZIN", type="primary", use_container_width=True):
+        status_code, ket_default = mapping[jenis_izin]
+        ket_final = ket_izin.upper() if ket_izin else ket_default
+        delta = (tgl_selesai_izin - tgl_mulai_izin).days
+        if delta < 0: st.error("Tanggal selesai salah!")
+        else:
+            for d in range(delta+1):
+                tgl = tgl_mulai_izin + timedelta(days=d)
+                tgl_str = tgl.strftime('%Y-%m-%d')
+                cek = absen_df[(absen_df['ID KARYAWAN']==id_izin) & (absen_df['TANGGAL MASUK']==tgl_str)] if not absen_df.empty else pd.DataFrame()
+                if not cek.empty:
+                    rn = cek.index[0]+2
+                    ws_absen.update(f'C{rn}:N{rn}', [[tgl_str, "", tgl_str, "", "0.00","0.00","0.00","0.00","-",ket_final,status_code,"0"]])
+                else:
+                    row_izin = [id_izin, nama_izin, tgl_str, "", tgl_str, "", "0.00","0.00","0.00","0.00","-",ket_final,status_code,"0"]
+                    ws_absen.insert_row(row_izin, 2)
+            load_data.clear()
+            st.success(f"✅ Izin {jenis_izin} {tgl_mulai_izin} s/d {tgl_selesai_izin} berhasil!"); st.balloons()
 
 with tab4:
     st.markdown("#### REKAP")
@@ -280,16 +291,15 @@ with tab5:
         if not df_g.empty:
             jml_undefined=len(df_g[df_g.apply(is_undefined_row, axis=1)]); jml_libur=len(df_g[df_g.apply(is_libur_row, axis=1)])
             df_complete=df_g[~df_g.apply(is_undefined_row, axis=1)&~df_g.apply(is_libur_row, axis=1)].copy()
-            df_complete['SHIFT']=df_complete['SHIFT'].fillna('').astype(str)
             hadir_valid=len(df_complete[df_complete['STATUS']=='H'])
             total_lembur=pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0).sum()
             shift_malam=len(df_complete[df_complete['SHIFT'].str.contains('S2|S3|LS1|LS2', na=False)])
             hari_lembur=len(df_complete[pd.to_numeric(df_complete['JAM LEMBUR'],errors='coerce').fillna(0)>0])
-            uang_makan=hadir_valid*9500; uang_transport=hadir_valid*0; uang_lembur=total_lembur*30000; uang_shift=shift_malam*2187; uang_makan_lembur=hari_lembur*9500
+            uang_makan=hadir_valid*9500; uang_lembur=total_lembur*30000; uang_shift=shift_malam*2187; uang_makan_lembur=hari_lembur*9500
             gaji_pokok=5252909; tunj_loyal=3500; jkk=12606; jkm=15758; jht_per=194357; jp_per=105058; bpjs_per=210116
-            total_pend=gaji_pokok+50000+uang_makan+uang_transport+uang_lembur+uang_shift+uang_makan_lembur+tunj_loyal+jkk+jkm+jht_per+jp_per+bpjs_per
+            total_pend=gaji_pokok+50000+uang_makan+uang_lembur+uang_shift+uang_makan_lembur+tunj_loyal+jkk+jkm+jht_per+jp_per+bpjs_per
             jht_tk=105058; jp_tk=52529; bpjs_kar=52529; total_pot=jkk+jkm+jht_per+jp_per+bpjs_per+jht_tk+jp_tk+bpjs_kar; total_gaji=total_pend-total_pot
-            st.session_state['payroll_data']={'id_kar':id_gaji,'nama':db_df[db_df['ID KARYAWAN']==id_gaji]['NAMA KARYAWAN'].values[0],'awal':awal_g,'akhir':akhir_g,'hadir_valid':hadir_valid,'uang_makan':uang_makan,'uang_transport':uang_transport,'total_lembur':total_lembur,'uang_lembur':uang_lembur,'shift_malam':shift_malam,'uang_shift':uang_shift,'hari_lembur':hari_lembur,'uang_makan_lembur':uang_makan_lembur,'total_pendapatan':total_pend,'total_potongan':total_pot,'total_gaji':total_gaji,'jml_undefined':jml_undefined,'jml_libur':jml_libur}
+            st.session_state['payroll_data']={'id_kar':id_gaji,'nama':db_df[db_df['ID KARYAWAN']==id_gaji]['NAMA KARYAWAN'].values[0],'awal':awal_g,'akhir':akhir_g,'hadir_valid':hadir_valid,'uang_makan':uang_makan,'uang_transport':0,'total_lembur':total_lembur,'uang_lembur':uang_lembur,'shift_malam':shift_malam,'uang_shift':uang_shift,'hari_lembur':hari_lembur,'uang_makan_lembur':uang_makan_lembur,'total_pendapatan':total_pend,'total_potongan':total_pot,'total_gaji':total_gaji,'jml_undefined':jml_undefined,'jml_libur':jml_libur}
             st.session_state['payroll_ready']=True
             c1,c2,c3,c4=st.columns(4); c1.metric("Hadir", hadir_valid); c2.metric("UNDEFINED", jml_undefined); c3.metric("Libur", jml_libur); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
     if st.session_state.get('payroll_ready'):
