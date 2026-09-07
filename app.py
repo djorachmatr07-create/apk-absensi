@@ -14,7 +14,7 @@ st.markdown("""
 .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
-<div class='sub-title'>SMART HR SYSTEM • V23 FINAL PDF LENGKAP</div>
+<div class='sub-title'>SMART HR SYSTEM • V24 FIX FOOTER</div>
 """, unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
@@ -109,7 +109,7 @@ def get_periode(bulan,tahun,mode):
         if bulan==1: return date(tahun-1,12,21), date(tahun,1,20)
         else: return date(tahun,bulan-1,21), date(tahun,bulan,20)
 
-def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, uang_makan, uang_transport, total_lembur, uang_lembur, shift_malam, uang_shift, hari_lembur, uang_makan_lembur, total_pendapatan, total_potongan, total_gaji):
+def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, uang_makan, uang_transport, total_lembur, uang_lembur, shift_malam, uang_shift, hari_lembur, uang_makan_lembur, total_pendapatan, total_potongan, total_gaji, jml_undefined):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -122,7 +122,6 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.cell(0, 6, f'ID: {id_kar} - {nama}', 0, 1, 'L')
     pdf.ln(2)
 
-    # PENDAPATAN LENGKAP
     pdf.set_font("Arial", 'B', 10)
     pdf.set_fill_color(0,100,0)
     pdf.set_text_color(255,255,255)
@@ -154,7 +153,6 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.cell(0, 7, f' Rp {int(total_pendapatan):,}', 1, 1, 'L', True)
     pdf.ln(3)
 
-    # POTONGAN LENGKAP
     pdf.set_font("Arial", 'B', 10)
     pdf.set_fill_color(150,0,0)
     pdf.set_text_color(255,255,255)
@@ -186,10 +184,10 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.set_text_color(255,255,0)
     pdf.cell(115, 9, ' TOTAL GAJI BERSIH', 1, 0, 'L', True)
     pdf.cell(0, 9, f' Rp {int(total_gaji):,}', 1, 1, 'L', True)
-    pdf.ln(3)
+    pdf.ln(4)
     pdf.set_text_color(0,0,0)
     pdf.set_font("Arial", 'I', 7)
-    pdf.cell(0, 4, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} | UNDEFINED tidak dihitung | Hari Makan=Transport={hadir_valid} hari', 0, 1, 'C')
+    pdf.cell(0, 4, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} | UNDEFINED: {jml_undefined} hari tidak dihitung', 0, 1, 'C')
     return bytes(pdf.output())
 
 tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
@@ -357,7 +355,8 @@ with tab5:
             df_g['JAM PULANG']=df_g['JAM PULANG'].astype(str)
             df_complete = df_g[(df_g['JAM MASUK'].str.strip()!="") & (~df_g['JAM MASUK'].isin(["0","0.00","nan","None",""] )) & (df_g['JAM PULANG'].str.strip()!="") & (~df_g['JAM PULANG'].isin(["0","0.00","nan","None",""] ))].copy()
             df_incomplete = df_g[~df_g.index.isin(df_complete.index)]
-            if not df_incomplete.empty: st.error(f"⚠️ {len(df_incomplete)} UNDEFINED tidak dihitung")
+            jml_undefined = len(df_incomplete)
+            if not df_incomplete.empty: st.error(f"⚠️ {jml_undefined} UNDEFINED tidak dihitung")
 
             df_complete['SHIFT']=df_complete['SHIFT'].fillna('').astype(str)
             hadir_valid = len(df_complete[df_complete['STATUS']=='H'])
@@ -382,17 +381,14 @@ with tab5:
                 'total_lembur':total_lembur,'uang_lembur':uang_lembur,
                 'shift_malam':shift_malam,'uang_shift':uang_shift,
                 'hari_lembur':hari_lembur,'uang_makan_lembur':uang_makan_lembur,
-                'total_pendapatan':total_pend,'total_potongan':total_pot,'total_gaji':total_gaji
+                'total_pendapatan':total_pend,'total_potongan':total_pot,'total_gaji':total_gaji,
+                'jml_undefined': jml_undefined
             }
             st.session_state['payroll_ready']=True
             st.dataframe(df_complete.sort_values('TGL_DT',ascending=False), use_container_width=True)
             c1,c2,c3,c4=st.columns(4)
             c1.metric("Hadir Valid", hadir_valid); c2.metric("Makan", f"{hadir_valid} Hari"); c3.metric("Transport", f"{hadir_valid} Hari x 0"); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
-            st.markdown(f"""
-            **PENDAPATAN:** Rp {int(total_pend):,}
-            **POTONGAN:** Rp {int(total_pot):,}
-            **BERSIH:** Rp {int(total_gaji):,}
-            """)
+            st.markdown(f"""**PENDAPATAN:** Rp {int(total_pend):,} | **POTONGAN:** Rp {int(total_pot):,} | **BERSIH:** Rp {int(total_gaji):,} | **UNDEFINED:** {jml_undefined} hari""")
             try:
                 ws_gaji.batch_update([
                     {'range':'B5','values':[[f"{hadir_valid} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},
@@ -413,7 +409,8 @@ with tab5:
             d['total_lembur'], d['uang_lembur'],
             d['shift_malam'], d['uang_shift'],
             d['hari_lembur'], d['uang_makan_lembur'],
-            d['total_pendapatan'], d['total_potongan'], d['total_gaji']
+            d['total_pendapatan'], d['total_potongan'], d['total_gaji'],
+            d['jml_undefined']
         )
         st.download_button(
             label="📄 DOWNLOAD PDF PAYROLL LENGKAP",
@@ -422,4 +419,4 @@ with tab5:
             mime="application/pdf",
             type="primary",
             use_container_width=True
-    )
+)
