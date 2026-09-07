@@ -160,46 +160,19 @@ with tab1:
     components.html("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap');
- .clock-box {
+.clock-box {
         background: radial-gradient(circle at center, #111 0%, #000 100%);
         border-radius:18px; padding:22px; border:1.5px solid #222;
         text-align:center; box-shadow: 0 0 40px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,0.1);
     }
- .smart-title {
-        font-family: 'Orbitron', sans-serif;
-        font-size:20px; font-weight:900;
-        color:#e5e7eb;
-        letter-spacing:3px;
-        display:flex; align-items:center; justify-content:center; gap:12px;
-    }
- .petir {
-        color:#facc15;
-        font-size:28px;
-        text-shadow: 0 0 10px #facc15, 0 0 20px #eab308, 0 0 30px #ca8a04;
-        animation: petirGlow 1s infinite alternate;
-    }
-    @keyframes petirGlow {
-        from { text-shadow: 0 0 10px #facc15, 0 0 20px #eab308; transform: scale(1); }
-        to { text-shadow: 0 0 15px #fde047, 0 0 30px #facc15, 0 0 45px #eab308; transform: scale(1.1); }
-    }
- .label-blink {
-        color:#facc15;
-        font-size:10px; letter-spacing:4px; font-weight:800; margin:10px 0 8px 0;
-        animation: blinkText 0.8s infinite steps(1);
-    }
-    @keyframes blinkText {
-        0% { opacity:1; color:#facc15; text-shadow:0 0 8px #facc15; }
-        50% { opacity:0.4; color:#facc15; text-shadow:none; }
-    }
-    #clock {
-        font-family:'Orbitron', monospace;
-        font-size:50px; font-weight:900;
-        letter-spacing:6px;
-        color:#22ff88;
-        text-shadow: 0 0 10px #22c55e, 0 0 25px #16a34a, 0 0 50px #15803d;
-    }
-    #date { color:#666; font-size:12px; margin-top:8px; letter-spacing:1px; }
- .dot { display:inline-block; width:8px; height:8px; background:#facc15; border-radius:50%; box-shadow:0 0 10px #facc15; animation: dotBlink 0.8s infinite steps(1); margin-right:6px; }
+.smart-title { font-family: 'Orbitron', sans-serif; font-size:20px; font-weight:900; color:#e5e7eb; letter-spacing:3px; display:flex; align-items:center; justify-content:center; gap:12px; }
+.petir { color:#facc15; font-size:28px; text-shadow: 0 0 10px #facc15, 0 0 20px #eab308; animation: petirGlow 1s infinite alternate; }
+    @keyframes petirGlow { from { text-shadow: 0 0 10px #facc15; } to { text-shadow: 0 0 20px #fde047, 0 0 40px #facc15; transform: scale(1.1); } }
+.label-blink { color:#facc15; font-size:10px; letter-spacing:4px; font-weight:800; margin:10px 0 8px 0; animation: blinkText 0.8s infinite steps(1); }
+    @keyframes blinkText { 0% { opacity:1; } 50% { opacity:0.3; } }
+    #clock { font-family:'Orbitron', monospace; font-size:50px; font-weight:900; letter-spacing:6px; color:#22ff88; text-shadow: 0 0 12px #22c55e, 0 0 25px #16a34a; }
+    #date { color:#666; font-size:12px; margin-top:8px; }
+.dot { display:inline-block; width:8px; height:8px; background:#facc15; border-radius:50%; box-shadow:0 0 10px #facc15; animation: dotBlink 0.8s infinite steps(1); margin-right:6px; }
     @keyframes dotBlink { 0% { opacity:1; } 50% { opacity:0.2; } }
     </style>
     <div class="clock-box">
@@ -220,6 +193,43 @@ with tab1:
         document.getElementById('date').innerText = tgl + ' WIB';
     }
     setInterval(updateClock, 1000); updateClock();
+
+    function speak(text){
+        try{
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = 'en-US';
+            u.rate = 0.95;
+            u.pitch = 1.1;
+            u.volume = 1;
+            // pilih suara cewe kalo ada
+            const voices = window.speechSynthesis.getVoices();
+            const female = voices.find(v => v.name.toLowerCase().includes('female') || v.name.includes('Samantha') || v.name.includes('Google US English'));
+            if(female) u.voice = female;
+            window.speechSynthesis.speak(u);
+        }catch(e){}
+    }
+    // preload voices
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+
+    try{
+        const parentDoc = window.parent.document;
+        function attachVoice(){
+            parentDoc.querySelectorAll('button').forEach(btn=>{
+                const txt = btn.innerText.toUpperCase();
+                if(txt.includes('ABSEN MASUK') &&!btn.dataset.voice){
+                    btn.dataset.voice='in';
+                    btn.addEventListener('click', ()=>{ setTimeout(()=>speak('Login successfully'), 200); });
+                }
+                if(txt.includes('PULANG SEKARANG') &&!btn.dataset.voice){
+                    btn.dataset.voice='out';
+                    btn.addEventListener('click', ()=>{ setTimeout(()=>speak('Logout successfully'), 200); });
+                }
+            });
+        }
+        setInterval(attachVoice, 500);
+    }catch(e){}
     </script>
     """, height=165)
 
@@ -228,7 +238,6 @@ with tab1:
     if nama: st.success(f"👋 {nama}")
 
     ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
-
     today_wib = now_wib().date()
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_wib.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
 
@@ -239,7 +248,6 @@ with tab1:
             jam_m=c2.time_input("JAM MASUK", value=now_wib().time(), key="jam_m")
         else:
             tgl_m=today_wib; jam_m=now_wib().time()
-
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
             if not ubah_manual:
                 klik_wib = now_wib(); tgl_m = klik_wib.date(); jam_m = klik_wib.time()
@@ -255,7 +263,6 @@ with tab1:
                 jam_p=c2.time_input("JAM PULANG", value=now_wib().time(), key="jam_p")
             else:
                 tgl_p=today_wib; jam_p=now_wib().time()
-
             if st.button("🔴 PULANG SEKARANG", type="primary", use_container_width=True):
                 if not ubah_manual:
                     klik_wib = now_wib(); tgl_p = klik_wib.date(); jam_p = klik_wib.time()
