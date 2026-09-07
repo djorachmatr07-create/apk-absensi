@@ -14,7 +14,7 @@ st.markdown("""
 .sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
 </style>
 <div class='main-title'>⚡ NEXA PRO</div>
-<div class='sub-title'>SMART HR SYSTEM • V24 FIX FOOTER</div>
+<div class='sub-title'>SMART HR SYSTEM • V25.1 UNDEFINED FIX</div>
 """, unsafe_allow_html=True)
 
 PASSWORD_ADMIN = "admin123"
@@ -61,6 +61,8 @@ def load_data():
         absen['JAM LEMBUR']=pd.to_numeric(absen['JAM LEMBUR'],errors='coerce').fillna(0)
         absen['JAM MASUK']=absen['JAM MASUK'].astype(str)
         absen['JAM PULANG']=absen['JAM PULANG'].astype(str)
+        absen['KETERANGAN']=absen['KETERANGAN'].astype(str)
+        absen['STATUS']=absen['STATUS'].astype(str)
     return db,absen,col_uang
 db_df,absen_df,COL_UANG_SHIFT=load_data()
 
@@ -187,7 +189,8 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.ln(4)
     pdf.set_text_color(0,0,0)
     pdf.set_font("Arial", 'I', 7)
-    pdf.cell(0, 4, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} | UNDEFINED: {jml_undefined} hari tidak dihitung', 0, 1, 'C')
+    # V25.1 - CUMA UNDEFINED REAL, LIBUR GAK DIHITUNG
+    pdf.cell(0, 4, f'Dicetak {now_wib().strftime("%d-%m-%Y %H:%M:%S WIB")} | UNDEFINED: {jml_undefined} hari tidak dihitung (Libur tidak dihitung)', 0, 1, 'C')
     return bytes(pdf.output())
 
 tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
@@ -330,8 +333,10 @@ with tab4:
     if not absen_df.empty:
         df_f=absen_df[(absen_df['TGL_DT']>=pd.to_datetime(awal_r))&(absen_df['TGL_DT']<=pd.to_datetime(akhir_r))].copy()
         if not df_f.empty:
-            jml_undefined = len(df_f[df_f['KETERANGAN'].astype(str).str.contains('UNDEFINED', na=False)])
-            if jml_undefined>0: st.error(f"⚠️ {jml_undefined} UNDEFINED tidak dihitung hadir")
+            jml_undefined = len(df_f[df_f['KETERANGAN'].str.contains('UNDEFINED', na=False)])
+            jml_libur = len(df_f[df_f['STATUS']=='L'])
+            if jml_undefined>0:
+                st.error(f"⚠️ UNDEFINED: {jml_undefined} hari tidak dihitung | Libur: {jml_libur} hari (tidak dihitung sebagai UNDEFINED)")
             st.dataframe(df_f.sort_values('TGL_DT',ascending=False), use_container_width=True, height=600)
 
 with tab5:
@@ -351,12 +356,15 @@ with tab5:
             st.warning("Data kosong")
             st.session_state['payroll_ready']=False
         else:
+            jml_undefined_real = len(df_g[df_g['KETERANGAN'].str.contains('UNDEFINED', na=False)])
+            jml_libur = len(df_g[df_g['STATUS']=='L'])
+
             df_g['JAM MASUK']=df_g['JAM MASUK'].astype(str)
             df_g['JAM PULANG']=df_g['JAM PULANG'].astype(str)
             df_complete = df_g[(df_g['JAM MASUK'].str.strip()!="") & (~df_g['JAM MASUK'].isin(["0","0.00","nan","None",""] )) & (df_g['JAM PULANG'].str.strip()!="") & (~df_g['JAM PULANG'].isin(["0","0.00","nan","None",""] ))].copy()
-            df_incomplete = df_g[~df_g.index.isin(df_complete.index)]
-            jml_undefined = len(df_incomplete)
-            if not df_incomplete.empty: st.error(f"⚠️ {jml_undefined} UNDEFINED tidak dihitung")
+
+            jml_undefined = jml_undefined_real
+            if jml_undefined>0: st.error(f"⚠️ UNDEFINED: {jml_undefined} hari tidak lengkap | Libur: {jml_libur} hari (bukan UNDEFINED)")
 
             df_complete['SHIFT']=df_complete['SHIFT'].fillna('').astype(str)
             hadir_valid = len(df_complete[df_complete['STATUS']=='H'])
@@ -387,8 +395,8 @@ with tab5:
             st.session_state['payroll_ready']=True
             st.dataframe(df_complete.sort_values('TGL_DT',ascending=False), use_container_width=True)
             c1,c2,c3,c4=st.columns(4)
-            c1.metric("Hadir Valid", hadir_valid); c2.metric("Makan", f"{hadir_valid} Hari"); c3.metric("Transport", f"{hadir_valid} Hari x 0"); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
-            st.markdown(f"""**PENDAPATAN:** Rp {int(total_pend):,} | **POTONGAN:** Rp {int(total_pot):,} | **BERSIH:** Rp {int(total_gaji):,} | **UNDEFINED:** {jml_undefined} hari""")
+            c1.metric("Hadir Valid", hadir_valid); c2.metric("UNDEFINED", jml_undefined); c3.metric("Libur", jml_libur); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
+            st.markdown(f"""**PENDAPATAN:** Rp {int(total_pend):,} | **POTONGAN:** Rp {int(total_pot):,} | **BERSIH:** Rp {int(total_gaji):,}""")
             try:
                 ws_gaji.batch_update([
                     {'range':'B5','values':[[f"{hadir_valid} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},
@@ -419,4 +427,4 @@ with tab5:
             mime="application/pdf",
             type="primary",
             use_container_width=True
-)
+            )
