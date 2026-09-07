@@ -6,3 +6,4 @@ requests
 icalendar
 openpyxl
 xlsxwriter
+fpdf2
