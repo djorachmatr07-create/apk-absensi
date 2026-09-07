@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 from fpdf import FPDF
 
 WIB = timezone(timedelta(hours=7))
-st.set_page_config(page_title="NEXA PRO", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="SMART HR SYSTEM", layout="wide", page_icon="⚡")
 
 @st.cache_resource
 def connect_gsheet():
@@ -114,7 +114,7 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, 'SLIP GAJI - NEXA PRO', 0, 1, 'C')
+    pdf.cell(0, 10, 'SLIP GAJI - SMART HR SYSTEM', 0, 1, 'C')
     pdf.set_font("Arial", '', 9)
     pdf.cell(0, 5, f'Periode: {periode_awal} s/d {periode_akhir} | Hadir {hadir_valid} | UNDEFINED {jml_undefined} | Libur {jml_libur}', 0, 1, 'C')
     pdf.ln(2)
@@ -159,44 +159,51 @@ tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
 with tab1:
     components.html("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Black+Ops+One&display=swap');
-  .clock-box {
-        background: linear-gradient(145deg, #0a0a0a 0%, #1e1e1e 50%, #0a0a0a 100%);
-        border-radius:16px; padding:20px; border:1px solid #333;
-        text-align:center; box-shadow: 0 0 40px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.1);
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap');
+ .clock-box {
+        background: radial-gradient(circle at center, #111 0%, #000 100%);
+        border-radius:18px; padding:22px; border:1.5px solid #222;
+        text-align:center; box-shadow: 0 0 40px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,0.1);
     }
- .nexa-title {
-        font-family:'Black Ops One', cursive;
-        font-size:32px;
-        background: linear-gradient(to bottom, #fff 0%, #aaa 45%, #fff 50%, #666 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        letter-spacing:4px;
-        filter: drop-shadow(0 0 15px rgba(255,255,255,0.4)) drop-shadow(0 3px 0 #000);
-        margin-bottom:10px;
+ .smart-title {
+        font-family: 'Orbitron', sans-serif;
+        font-size:20px; font-weight:900;
+        color:#e5e7eb;
+        letter-spacing:3px;
+        display:flex; align-items:center; justify-content:center; gap:12px;
+    }
+ .petir {
+        color:#facc15;
+        font-size:28px;
+        text-shadow: 0 0 10px #facc15, 0 0 20px #eab308, 0 0 30px #ca8a04;
+        animation: petirGlow 1s infinite alternate;
+    }
+    @keyframes petirGlow {
+        from { text-shadow: 0 0 10px #facc15, 0 0 20px #eab308; transform: scale(1); }
+        to { text-shadow: 0 0 15px #fde047, 0 0 30px #facc15, 0 0 45px #eab308; transform: scale(1.1); }
     }
  .label-blink {
         color:#facc15;
-        font-size:10px; letter-spacing:4px; font-weight:800; margin-bottom:8px;
+        font-size:10px; letter-spacing:4px; font-weight:800; margin:10px 0 8px 0;
         animation: blinkText 0.8s infinite steps(1);
     }
     @keyframes blinkText {
         0% { opacity:1; color:#facc15; text-shadow:0 0 8px #facc15; }
-        50% { opacity:0.3; color:#ef4444; text-shadow:0 0 8px #ef4444; }
+        50% { opacity:0.4; color:#facc15; text-shadow:none; }
     }
     #clock {
         font-family:'Orbitron', monospace;
-        font-size:48px; font-weight:900;
+        font-size:50px; font-weight:900;
         letter-spacing:6px;
-        color:#fde047;
-        text-shadow: 0 0 12px #facc15, 0 0 25px #eab308, 0 0 50px #ca8a04;
+        color:#22ff88;
+        text-shadow: 0 0 10px #22c55e, 0 0 25px #16a34a, 0 0 50px #15803d;
     }
-    #date { color:#777; font-size:12px; margin-top:8px; letter-spacing:1px; }
- .dot { display:inline-block; width:9px; height:9px; background:#facc15; border-radius:50%; animation: dotBlink 0.8s infinite steps(1); margin-right:7px; }
-    @keyframes dotBlink { 0% { background:#facc15; box-shadow:0 0 12px #facc15; opacity:1; } 50% { background:#ef4444; box-shadow:0 0 12px #ef4444; opacity:0.3; } }
+    #date { color:#666; font-size:12px; margin-top:8px; letter-spacing:1px; }
+ .dot { display:inline-block; width:8px; height:8px; background:#facc15; border-radius:50%; box-shadow:0 0 10px #facc15; animation: dotBlink 0.8s infinite steps(1); margin-right:6px; }
+    @keyframes dotBlink { 0% { opacity:1; } 50% { opacity:0.2; } }
     </style>
     <div class="clock-box">
-        <div class="nexa-title">⚡ NEXA PRO</div>
+        <div class="smart-title"><span class="petir">⚡</span> SMART HR SYSTEM <span class="petir">⚡</span></div>
         <div class="label-blink"><span class="dot"></span>WAKTU REALTIME WIB</div>
         <div id="clock">--:--:--</div>
         <div id="date">Loading...</div>
@@ -214,13 +221,12 @@ with tab1:
     }
     setInterval(updateClock, 1000); updateClock();
     </script>
-    """, height=160)
+    """, height=165)
 
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
 
-    # CEKLIS MANUAL BALIK LAGI MIN
     ubah_manual=st.checkbox("✏️ Ubah Tanggal & Jam Manual?", value=False)
 
     today_wib = now_wib().date()
