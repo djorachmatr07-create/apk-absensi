@@ -8,15 +8,6 @@ from fpdf import FPDF
 WIB = timezone(timedelta(hours=7))
 st.set_page_config(page_title="NEXA PRO", layout="wide", page_icon="⚡")
 
-st.markdown("""
-<style>
-.main-title { font-size:30px; font-weight:900; letter-spacing:1px; margin-bottom:0px; }
-.sub-title { color:#6B7280; font-size:11px; margin-top:-6px; letter-spacing:2.5px; font-weight:600; }
-</style>
-<div class='main-title'>⚡ NEXA PRO</div>
-<div class='sub-title'>SMART HR SYSTEM • V28 GLOW CLOCK</div>
-""", unsafe_allow_html=True)
-
 @st.cache_resource
 def connect_gsheet():
     scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
@@ -135,16 +126,7 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
     pdf.cell(0, 7, ' PENDAPATAN', 1, 1, 'L', True)
     pdf.set_text_color(0,0,0); pdf.set_font("Arial", '', 9)
     tunj_loyal=3500; jkk=12606; jkm=15758; jht_per=194357; jp_per=105058; bpjs_per=210116
-    pend=[
-        (f"Gaji Pokok", 5252909),(f"Premi Hadir", 50000),
-        (f"Uang Makan ({hadir_valid} Hari x 9500)", uang_makan),
-        (f"Uang Transport ({hadir_valid} Hari x 0)", uang_transport),
-        (f"Uang Lembur ({total_lembur:.2f} Jam x 30000)", int(uang_lembur)),
-        (f"Uang Shift ({shift_malam} Hari x 2187)", int(uang_shift)),
-        (f"Uang Makan Lembur ({hari_lembur} Hari x 9500)", int(uang_makan_lembur)),
-        (f"Tunjangan Loyalitas", tunj_loyal),(f"JKK (0.24%)", jkk),(f"JKM (0.30%)", jkm),
-        (f"JHT Perusahaan (3.7%)", jht_per),(f"JP Perusahaan (2%)", jp_per),(f"BPJS Kes Perusahaan (4%)", bpjs_per),
-    ]
+    pend=[(f"Gaji Pokok", 5252909),(f"Premi Hadir", 50000),(f"Uang Makan ({hadir_valid} Hari x 9500)", uang_makan),(f"Uang Transport ({hadir_valid} Hari x 0)", uang_transport),(f"Uang Lembur ({total_lembur:.2f} Jam x 30000)", int(uang_lembur)),(f"Uang Shift ({shift_malam} Hari x 2187)", int(uang_shift)),(f"Uang Makan Lembur ({hari_lembur} Hari x 9500)", int(uang_makan_lembur)),(f"Tunjangan Loyalitas", tunj_loyal),(f"JKK (0.24%)", jkk),(f"JKM (0.30%)", jkm),(f"JHT Perusahaan (3.7%)", jht_per),(f"JP Perusahaan (2%)", jp_per),(f"BPJS Kes Perusahaan (4%)", bpjs_per),]
     for n,v in pend:
         pdf.cell(115, 6, f" {n}", border=1)
         pdf.cell(0, 6, f" Rp {v:,}", border=1, ln=1)
@@ -175,38 +157,42 @@ def create_payroll_pdf(id_kar, nama, periode_awal, periode_akhir, hadir_valid, u
 tab1,tab2,tab3,tab4,tab5=st.tabs(["ABSEN","EDIT","ADMIN","REKAP","PAYROLL"])
 
 with tab1:
-    # EFEK MENYALA GLOW NEON
     components.html("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Black+Ops+One&display=swap');
    .clock-box {
-        background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
-        border-radius:16px; padding:18px; border:1px solid #1e293b;
-        text-align:center; box-shadow: inset 0 0 30px rgba(34,197,94,0.15);
+        background: linear-gradient(145deg, #0a0a0a 0%, #1e1e1e 50%, #0a0a0a 100%);
+        border-radius:16px; padding:20px; border:1px solid #333;
+        text-align:center; box-shadow: 0 0 40px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.1);
     }
-   .label { color:#64748b; font-size:10px; letter-spacing:4px; font-weight:800; }
-    #clock {
-        color:#22ff77;
-        font-family:'Orbitron', monospace;
-        font-size:42px; font-weight:900;
+   .nexa-title {
+        font-family:'Black Ops One', cursive;
+        font-size:32px;
+        background: linear-gradient(to bottom, #fff 0%, #aaa 45%, #fff 50%, #666 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
         letter-spacing:4px;
-        text-shadow: 0 0 7px #22c55e, 0 0 15px #22c55e, 0 0 30px #16a34a, 0 0 45px #16a34a;
-        animation: flicker 1.5s infinite alternate, glowPulse 2s infinite alternate;
+        filter: drop-shadow(0 0 15px rgba(255,255,255,0.4)) drop-shadow(0 3px 0 #000);
+        margin-bottom:10px;
     }
-    @keyframes glowPulse {
-        from { text-shadow: 0 0 7px #22c55e, 0 0 15px #22c55e, 0 0 20px #16a34a; }
-        to { text-shadow: 0 0 10px #4ade80, 0 0 25px #22c55e, 0 0 40px #16a34a, 0 0 60px #15803d; }
+   .label { color:#555; font-size:10px; letter-spacing:4px; font-weight:800; margin-bottom:8px; }
+    #clock {
+        font-family:'Orbitron', monospace;
+        font-size:48px; font-weight:900;
+        letter-spacing:6px;
+        animation: yellowRed 0.7s infinite steps(1);
     }
-    @keyframes flicker {
-        0%, 100% { opacity:1; }
-        50% { opacity:0.95; }
+    @keyframes yellowRed {
+        0% { color:#fde047; text-shadow: 0 0 10px #facc15, 0 0 25px #eab308, 0 0 50px #ca8a04; }
+        50% { color:#ff1a1a; text-shadow: 0 0 10px #ef4444, 0 0 25px #dc2626, 0 0 50px #991b1b; }
     }
-    #date { color:#e2e8f0; font-size:13px; margin-top:6px; letter-spacing:1px; }
-   .dot { display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; box-shadow:0 0 10px #22c55e; animation: blink 1s infinite; margin-right:6px; }
-    @keyframes blink { 0%, 50% { opacity:1; } 51%, 100% { opacity:0.3; } }
+    #date { color:#777; font-size:12px; margin-top:8px; letter-spacing:1px; }
+   .dot { display:inline-block; width:9px; height:9px; background:#facc15; border-radius:50%; animation: dotBlink 0.7s infinite steps(1); margin-right:7px; }
+    @keyframes dotBlink { 0% { background:#facc15; box-shadow:0 0 12px #facc15; } 50% { background:#ef4444; box-shadow:0 0 12px #ef4444; } }
     </style>
     <div class="clock-box">
-        <div class="label"><span class="dot"></span>WAKTU REALTIME WIB • MENYALA</div>
+        <div class="nexa-title">⚡ NEXA PRO</div>
+        <div class="label"><span class="dot"></span>WAKTU REALTIME WIB</div>
         <div id="clock">--:--:--</div>
         <div id="date">Loading...</div>
     </div>
@@ -221,24 +207,20 @@ with tab1:
         document.getElementById('clock').innerText = jam+':'+menit+':'+detik;
         document.getElementById('date').innerText = tgl + ' WIB';
     }
-    setInterval(updateClock, 1000);
-    updateClock();
+    setInterval(updateClock, 1000); updateClock();
     </script>
-    """, height=140)
+    """, height=160)
 
     id_in=st.text_input("ID ABSEN", value="01213027").strip().zfill(8)
     nama=db_df[db_df['ID KARYAWAN']==id_in]['NAMA KARYAWAN'].values[0] if id_in in db_df['ID KARYAWAN'].values else ""
     if nama: st.success(f"👋 {nama}")
-    ubah_manual=st.checkbox("✏️ Manual?", value=False)
     today_wib = now_wib().date()
     row_today=absen_df[(absen_df['ID KARYAWAN']==id_in)&(absen_df['TANGGAL MASUK']==today_wib.strftime('%Y-%m-%d'))&(~absen_df['JAM MASUK'].apply(is_missing))] if not absen_df.empty else pd.DataFrame()
     if row_today.empty:
         if st.button("🟢 ABSEN MASUK", type="primary", use_container_width=True):
             klik_wib = now_wib(); tgl_m = klik_wib.date(); jam_m = klik_wib.time()
-            masuk_dt=datetime.combine(tgl_m, jam_m)
-            row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),masuk_dt.strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED","H","0"]
-            ws_absen.insert_row(row,2)
-            load_data.clear(); st.balloons(); st.rerun()
+            row=[id_in,nama,tgl_m.strftime('%Y-%m-%d'),datetime.combine(tgl_m, jam_m).strftime('%H:%M:%S'),"","","0.00","0.00","0.00","0.00","-","UNDEFINED","H","0"]
+            ws_absen.insert_row(row,2); load_data.clear(); st.balloons(); st.rerun()
     else:
         r=row_today.iloc[0]
         if is_missing(r['JAM PULANG']):
@@ -315,14 +297,6 @@ with tab5:
             st.session_state['payroll_ready']=True
             c1,c2,c3,c4=st.columns(4)
             c1.metric("Hadir", hadir_valid); c2.metric("UNDEFINED", jml_undefined); c3.metric("Libur", jml_libur); c4.metric("TOTAL", f"Rp {int(total_gaji):,}")
-            ws_gaji.batch_update([
-                {'range':'B5','values':[[f"{hadir_valid} Hari x 9500"]]},{'range':'C5','values':[[int(uang_makan)]]},
-                {'range':'B6','values':[[f"{hadir_valid} Hari x 0"]]},{'range':'C6','values':[[0]]},
-                {'range':'B7','values':[[f"{total_lembur:.2f} Jam x 30000"]]},{'range':'C7','values':[[int(uang_lembur)]]},
-                {'range':'B8','values':[[f"{shift_malam} Hari x 2187"]]},{'range':'C8','values':[[int(uang_shift)]]},
-                {'range':'B9','values':[[f"{hari_lembur} Hari x 9500"]]},{'range':'C9','values':[[int(uang_makan_lembur)]]},
-                {'range':'C17','values':[[int(total_pend)]]},{'range':'E17','values':[[int(total_pot)]]},{'range':'C19','values':[[int(total_gaji)]]}
-            ])
     if st.session_state.get('payroll_ready'):
         d=st.session_state['payroll_data']
         pdf_bytes = create_payroll_pdf(
